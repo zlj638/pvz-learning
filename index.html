@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>植物大战僵尸 - 学习版</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- ==================== 开始画面 ==================== -->
+<div id="startScreen" class="start-screen">
+    <div class="game-emoji">🌻🧟🌱</div>
+    <div class="game-title">植物大战僵尸</div>
+    <div class="game-subtitle">学习大冒险 - 一年级篇</div>
+    <div class="rules">
+        <ul style="list-style:none; padding:0;">
+            <li>📚 每天<strong>完成语文、数学、英语</strong>各一页学习任务</li>
+            <li>☀️ 完成任务获得<strong>阳光</strong>，答对题目还有额外奖励</li>
+            <li>🌻 用阳光种植<strong>向日葵、豌豆射手</strong>等植物</li>
+            <li>🧟 完成任务植物会<strong>攻击僵尸</strong>，不做任务僵尸就会前进</li>
+            <li>🔓 完成5/10/15页解锁<strong>新植物</strong></li>
+            <li>🏆 完成一整本书，植物发射<strong>终极武器</strong>消灭僵尸！</li>
+            <li>💀 连续不做任务，僵尸会<strong>吃掉植物</strong>，植物全灭则游戏结束</li>
+        </ul>
+    </div>
+    <button class="btn btn-primary btn-lg" onclick="Game.start()">
+        🎮 开始冒险
+    </button>
+</div>
+
+<!-- ==================== 主游戏界面 ==================== -->
+<div id="app" class="hidden">
+    <!-- 顶部状态栏 -->
+    <div class="status-bar">
+        <div class="status-item sun-counter">
+            <span class="icon">☀️</span>
+            <span class="value" id="sunCount">50</span>
+        </div>
+        <div class="status-item day-counter">
+            <span class="icon">📅</span>
+            <span>第</span>
+            <span class="value" id="dayCount">1</span>
+            <span>天</span>
+        </div>
+        <div class="status-item">
+            <button class="btn btn-warning" style="padding:6px 16px; font-size:14px;" onclick="Game.endDay()">
+                🌙 结束今天
+            </button>
+        </div>
+    </div>
+
+    <!-- 花园战场 -->
+    <div class="battlefield" id="battlefield">
+        <!-- 三条赛道由JS动态生成 -->
+    </div>
+
+    <!-- 植物商店 -->
+    <div class="plant-shop" id="plantShop">
+        <span class="shop-label">🌱 植物商店</span>
+        <!-- 植物卡片由JS动态生成 -->
+    </div>
+
+    <!-- 底部任务面板 -->
+    <div class="task-panel" id="taskPanel">
+        <!-- 任务卡片由JS动态生成 -->
+    </div>
+</div>
+
+<!-- ==================== 学习弹窗 ==================== -->
+<div id="quizModal" class="modal-overlay hidden">
+    <div class="modal">
+        <div class="quiz-container">
+            <div class="modal-title" id="quizTitle">📖 学习时间</div>
+            <div class="quiz-progress" id="quizProgress"></div>
+            <div class="quiz-question" id="quizQuestion"></div>
+            <div class="quiz-options" id="quizOptions"></div>
+            <div class="quiz-feedback" id="quizFeedback"></div>
+            <div class="quiz-reward hidden" id="quizReward"></div>
+            <button class="btn btn-primary hidden" id="quizNextBtn" onclick="Game.nextQuestion()">下一题 →</button>
+            <button class="btn btn-success hidden" id="quizFinishBtn" onclick="Game.finishQuiz()">完成！🎉</button>
+        </div>
+    </div>
+</div>
+
+<!-- ==================== 游戏结束画面 ==================== -->
+<div id="gameOverScreen" class="game-over-screen hidden">
+    <div class="result-emoji" id="resultEmoji">🏆</div>
+    <div class="result-title" id="resultTitle">胜利！</div>
+    <div class="result-desc" id="resultDesc"></div>
+    <button class="btn btn-primary btn-lg" onclick="Game.restart()">🔄 重新开始</button>
+</div>
+
+<!-- ==================== 脚本 ==================== -->
+<script src="js/data.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>
