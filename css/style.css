@@ -97,6 +97,18 @@ html, body {
     padding: 2px 12px;
 }
 
+.mode-indicator {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 20px;
+    padding: 2px 12px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.mode-indicator .mode-text {
+    font-size: 14px;
+}
+
 /* ==================== 花园战场 ==================== */
 .battlefield {
     flex: 1;
@@ -774,6 +786,285 @@ html, body {
     100% { transform: scale(1); }
 }
 
+/* ==================== 离线书写模态框 ==================== */
+.offline-modal-content {
+    max-height: calc(100dvh - 32px);
+    overflow-y: auto;
+}
+
+.offline-phase {
+    animation: modalSlide 0.3s ease-out;
+}
+
+.offline-instructions {
+    font-size: 15px;
+    color: #5D4037;
+    text-align: center;
+    margin: 8px 0 16px;
+    background: #FFF3E0;
+    padding: 12px;
+    border-radius: var(--radius);
+    border: 2px solid #FFE0B2;
+}
+
+/* 题目展示列表 */
+.offline-questions {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin: 12px 0 16px;
+}
+
+.offline-question-item {
+    background: #fff;
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.offline-question-num {
+    font-size: 24px;
+    font-weight: bold;
+    color: #FF9800;
+    min-width: 36px;
+    text-align: center;
+}
+
+.offline-question-text {
+    font-size: 18px;
+    font-weight: bold;
+    color: #3E2723;
+    line-height: 1.5;
+    flex: 1;
+}
+
+.offline-question-hint {
+    font-size: 13px;
+    color: #9E9E9E;
+    margin-top: 4px;
+}
+
+/* 拍照按钮 */
+.offline-camera-btn {
+    width: 100%;
+    font-size: 20px;
+    margin-top: 8px;
+}
+
+.offline-album-btn {
+    width: 100%;
+    font-size: 16px;
+    margin-top: 8px;
+}
+
+/* ==================== 相机 ==================== */
+.camera-container {
+    width: 100%;
+    max-height: 300px;
+    background: #000;
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin: 12px 0;
+    position: relative;
+}
+
+.camera-container video {
+    width: 100%;
+    height: auto;
+    max-height: 300px;
+    object-fit: cover;
+    display: block;
+}
+
+.camera-container canvas {
+    width: 100%;
+    display: block;
+}
+
+.camera-controls {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    margin: 8px 0;
+}
+
+.camera-controls .btn {
+    flex: 1;
+    max-width: 150px;
+}
+
+/* 拍照闪光特效 */
+.camera-flash {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: #fff;
+    z-index: 5000;
+    animation: flashEffect 0.3s ease-out forwards;
+    pointer-events: none;
+}
+
+@keyframes flashEffect {
+    0% { opacity: 0.8; }
+    100% { opacity: 0; }
+}
+
+/* ==================== 核对答案 ==================== */
+.verify-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.verify-photo {
+    background: #000;
+    border-radius: var(--radius);
+    overflow: hidden;
+    max-height: 200px;
+    position: relative;
+}
+
+.verify-photo img {
+    width: 100%;
+    height: auto;
+    max-height: 200px;
+    object-fit: contain;
+    display: block;
+}
+
+.photo-placeholder {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: #999;
+    font-size: 14px;
+}
+
+.verify-questions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.verify-question-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    background: #fff;
+    border-radius: var(--radius);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    font-size: 15px;
+}
+
+.verify-q-num {
+    font-size: 18px;
+    font-weight: bold;
+    color: #FF9800;
+    min-width: 24px;
+}
+
+.verify-q-text {
+    flex: 1;
+    font-size: 15px;
+    color: #3E2723;
+    line-height: 1.3;
+}
+
+.verify-q-answer {
+    font-size: 15px;
+    font-weight: bold;
+    color: #4CAF50;
+    background: #E8F5E9;
+    padding: 4px 10px;
+    border-radius: 8px;
+    white-space: nowrap;
+}
+
+.verify-q-buttons {
+    display: flex;
+    gap: 4px;
+}
+
+.verify-btn-check {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 2px solid #4CAF50;
+    background: #fff;
+    color: #4CAF50;
+    font-size: 20px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.verify-btn-check:hover {
+    background: #4CAF50;
+    color: #fff;
+}
+
+.verify-btn-check.marked-correct {
+    background: #4CAF50;
+    color: #fff;
+    border-color: #4CAF50;
+}
+
+.verify-btn-cross {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 2px solid #F44336;
+    background: #fff;
+    color: #F44336;
+    font-size: 20px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.verify-btn-cross:hover {
+    background: #F44336;
+    color: #fff;
+}
+
+.verify-btn-cross.marked-wrong {
+    background: #F44336;
+    color: #fff;
+    border-color: #F44336;
+}
+
+.verify-question-row.all-correct {
+    background: #E8F5E9;
+    border-left: 4px solid #4CAF50;
+}
+
+.verify-question-row.has-wrong {
+    background: #FFEBEE;
+    border-left: 4px solid #F44336;
+}
+
+.verify-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 16px;
+    justify-content: center;
+}
+
+.verify-actions .btn {
+    flex: 1;
+}
+
 /* ==================== 开始画面 ==================== */
 .start-screen {
     position: fixed;
@@ -840,6 +1131,58 @@ html, body {
 }
 
 .start-screen .rules strong {
+    color: #FFD700;
+}
+
+/* ==================== 模式选择器 ==================== */
+.mode-selector {
+    display: flex;
+    gap: 16px;
+    margin: 16px 0 24px;
+    max-width: 400px;
+    width: 100%;
+}
+
+.mode-option {
+    flex: 1;
+    padding: 16px 12px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 3px solid rgba(255, 255, 255, 0.15);
+    border-radius: 16px;
+    cursor: pointer;
+    transition: all 0.3s;
+    text-align: center;
+}
+
+.mode-option:hover {
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.mode-option.active {
+    background: rgba(255, 215, 0, 0.2);
+    border-color: #FFD700;
+    box-shadow: 0 0 20px rgba(255, 215, 0, 0.3);
+}
+
+.mode-option .mode-icon {
+    font-size: 40px;
+    margin-bottom: 8px;
+}
+
+.mode-option .mode-label {
+    font-size: 16px;
+    font-weight: bold;
+    color: #fff;
+    margin-bottom: 4px;
+}
+
+.mode-option .mode-desc {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.7);
+    line-height: 1.4;
+}
+
+.mode-option.active .mode-label {
     color: #FFD700;
 }
 
@@ -1002,6 +1345,37 @@ html, body {
         padding: 10px 24px;
         font-size: 16px;
     }
+    .mode-selector {
+        gap: 10px;
+    }
+    .mode-option {
+        padding: 12px 8px;
+    }
+    .mode-option .mode-icon {
+        font-size: 32px;
+    }
+    .mode-option .mode-label {
+        font-size: 14px;
+    }
+    .mode-option .mode-desc {
+        font-size: 11px;
+    }
+    .offline-question-text {
+        font-size: 16px;
+    }
+    .camera-container {
+        max-height: 250px;
+    }
+    .verify-photo {
+        max-height: 160px;
+    }
+    .verify-q-text {
+        font-size: 13px;
+    }
+    .verify-q-answer {
+        font-size: 13px;
+        padding: 3px 8px;
+    }
 }
 
 @media (max-width: 380px) {
@@ -1037,6 +1411,16 @@ html, body {
     .btn {
         padding: 8px 20px;
         font-size: 15px;
+    }
+    .mode-selector {
+        flex-direction: column;
+        gap: 8px;
+    }
+    .offline-question-text {
+        font-size: 14px;
+    }
+    .verify-q-answer {
+        font-size: 12px;
     }
 }
 

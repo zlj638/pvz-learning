@@ -31,6 +31,7 @@ const Game = {
             subjectCompleted: { chinese: false, math: false, english: false },
             zombieIdCounter: 0,
             plantIdCounter: 0,
+            mode: 'online',  // 'online' 或 'offline'
         };
         this.loadState();
     },
@@ -64,6 +65,10 @@ const Game = {
         document.getElementById("startScreen").classList.add("hidden");
         document.getElementById("app").classList.remove("hidden");
         document.getElementById("gameOverScreen").classList.add("hidden");
+
+        // 恢复模式选择器 UI
+        this.updateModeUI();
+
         this.renderAll();
         this.checkUnlocks();
         this.showToast("🌱 欢迎来到花园！先种一棵向日葵吧！", "success");
@@ -72,6 +77,39 @@ const Game = {
     restart() {
         this.clearSave();
         this.start();
+    },
+
+    // ==================== 模式管理 ====================
+    setMode(mode) {
+        this.state.mode = mode;
+        this.saveState();
+
+        // 更新开始画面选择器
+        document.getElementById('modeOnline').classList.toggle('active', mode === 'online');
+        document.getElementById('modeOffline').classList.toggle('active', mode === 'offline');
+
+        // 更新状态栏指示器
+        const icon = mode === 'online' ? '📱' : '📝';
+        const text = mode === 'online' ? '在线' : '线下';
+        document.getElementById('modeIndicatorIcon').textContent = icon;
+        document.getElementById('modeIndicatorText').textContent = text;
+
+        // 更新任务面板（显示模式标识）
+        this.renderTaskPanel();
+
+        this.showToast(mode === 'online' ? '📱 已切换到在线答题模式' : '📝 已切换到线下书写模式', 'success');
+    },
+
+    toggleMode() {
+        this.setMode(this.state.mode === 'online' ? 'offline' : 'online');
+    },
+
+    updateModeUI() {
+        const mode = this.state.mode;
+        document.getElementById('modeOnline').classList.toggle('active', mode === 'online');
+        document.getElementById('modeOffline').classList.toggle('active', mode === 'offline');
+        document.getElementById('modeIndicatorIcon').textContent = mode === 'online' ? '📱' : '📝';
+        document.getElementById('modeIndicatorText').textContent = mode === 'online' ? '在线' : '线下';
     },
 
     // ==================== 渲染 ====================
@@ -312,9 +350,15 @@ const Game = {
             answered: false,
         };
 
-        document.getElementById("quizTitle").innerHTML = `${subject.icon} ${subject.name} - ${page.title}`;
-        document.getElementById("quizModal").classList.remove("hidden");
-        this.renderQuestion();
+        if (this.state.mode === 'online') {
+            // 原有在线模式流程不变
+            document.getElementById("quizTitle").innerHTML = `${subject.icon} ${subject.name} - ${page.title}`;
+            document.getElementById("quizModal").classList.remove("hidden");
+            this.renderQuestion();
+        } else {
+            // 离线书写模式
+            this.startOfflineQuiz(subjectKey);
+        }
     },
 
     renderQuestion() {
@@ -457,6 +501,317 @@ const Game = {
 
             this.showToast(`🎉 完成${subject.name}！获得${totalReward}阳光！`, "success");
         }, 2000);
+    },
+
+    // ==================== 离线书写模式 ====================
+
+    // 阶段1：展示题目
+    startOfflineQuiz(subjectKey) {
+        const subject = CURRICULUM[subjectKey];
+        const lane = this.state.lanes.find(l => l.subject === subjectKey);
+        const page = subject.pages[lane.currentPage];
+
+        document.getElementById('offlineTitle').innerHTML = `${subject.icon} ${subject.name} - ${page.title}`;
+
+        // 生成题目列表（只显示题号和题目文字，不显示选项）
+        const questionsEl = document.getElementById('offlineQuestions');
+        questionsEl.innerHTML = '';
+
+        page.questions.forEach((q, idx) => {
+            const item = document.createElement('div');
+            item.className = 'offline-question-item';
+            item.innerHTML = `
+                <div class="offline-question-num">${idx + 1}</div>
+                <div class="offline-question-text">
+                    ${q.q}
+                    <div class="offline-question-hint">请在本子上写出答案</div>
+                </div>
+            `;
+            questionsEl.appendChild(item);
+        });
+
+        // 重置所有阶段，显示阶段1
+        document.getElementById('offlinePhase1').classList.remove('hidden');
+        document.getElementById('offlinePhase2').classList.add('hidden');
+        document.getElementById('offlinePhase3').classList.add('hidden');
+
+        document.getElementById('offlineModal').classList.remove('hidden');
+    },
+
+    // 阶段2：打开相机
+    async openCamera() {
+        document.getElementById('offlinePhase1').classList.add('hidden');
+        document.getElementById('offlinePhase2').classList.remove('hidden');
+
+        const video = document.getElementById('cameraVideo');
+
+        try {
+            // 优先使用后置摄像头（facingMode: environment）
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                    facingMode: 'environment',
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                }
+            });
+            video.srcObject = stream;
+            this._cameraStream = stream;
+
+            video.classList.remove('hidden');
+            document.getElementById('cameraCanvas').classList.add('hidden');
+            document.getElementById('captureBtn').classList.remove('hidden');
+        } catch (err) {
+            console.error('相机访问失败:', err);
+
+            // 处理不同错误类型
+            if (err.name === 'NotAllowedError') {
+                this.showToast('⚠️ 相机权限被拒绝，请在设置中允许相机访问', 'warning');
+            } else if (err.name === 'NotFoundError') {
+                this.showToast('⚠️ 未找到摄像头设备', 'danger');
+            } else if (err.name === 'NotReadableError') {
+                this.showToast('⚠️ 摄像头被其他应用占用', 'warning');
+            } else {
+                this.showToast('⚠️ 无法打开相机: ' + err.message, 'danger');
+            }
+
+            // 回退到阶段1，允许重新尝试或使用相册
+            document.getElementById('offlinePhase2').classList.add('hidden');
+            document.getElementById('offlinePhase1').classList.remove('hidden');
+        }
+    },
+
+    // 拍照截取
+    capturePhoto() {
+        const video = document.getElementById('cameraVideo');
+        const canvas = document.getElementById('cameraCanvas');
+
+        if (!video.srcObject) {
+            this.showToast('⚠️ 相机未就绪', 'warning');
+            return;
+        }
+
+        // 截取视频帧到 canvas
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        // 保存照片数据
+        this._capturedPhotoDataURL = canvas.toDataURL('image/jpeg', 0.85);
+
+        // 播放闪光效果
+        const flash = document.createElement('div');
+        flash.className = 'camera-flash';
+        document.body.appendChild(flash);
+        setTimeout(() => flash.remove(), 300);
+
+        // 关闭相机流
+        this.stopCamera();
+
+        // 进入核对阶段
+        this.showVerifyPhase();
+    },
+
+    // 重拍（回到相机预览）
+    retakePhoto() {
+        // 清除已拍照片
+        this._capturedPhotoDataURL = null;
+
+        // 重新打开相机
+        this.openCamera();
+    },
+
+    // 停止相机流
+    stopCamera() {
+        if (this._cameraStream) {
+            this._cameraStream.getTracks().forEach(track => track.stop());
+            this._cameraStream = null;
+        }
+    },
+
+    // 降级方法：从相册/文件选择照片
+    selectPhotoFromAlbum() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                this._capturedPhotoDataURL = ev.target.result;
+                // 隐藏阶段1，直接进入核对阶段
+                document.getElementById('offlinePhase1').classList.add('hidden');
+                this.showVerifyPhase();
+            };
+            reader.readAsDataURL(file);
+        };
+        input.click();
+    },
+
+    // 阶段3：核对答案
+    showVerifyPhase() {
+        document.getElementById('offlinePhase2').classList.add('hidden');
+        document.getElementById('offlinePhase3').classList.remove('hidden');
+
+        // 显示照片
+        const photoImg = document.getElementById('verifyPhotoImg');
+        const placeholder = document.getElementById('photoPlaceholder');
+
+        if (this._capturedPhotoDataURL) {
+            photoImg.src = this._capturedPhotoDataURL;
+            photoImg.classList.remove('hidden');
+            placeholder.classList.add('hidden');
+        } else {
+            photoImg.classList.add('hidden');
+            placeholder.textContent = '未拍摄照片';
+            placeholder.classList.remove('hidden');
+        }
+
+        // 生成核对列表：题号 + 题目 + 正确答案 + ✓/✗ 按钮
+        const verifyQuestionsEl = document.getElementById('verifyQuestions');
+        verifyQuestionsEl.innerHTML = '';
+
+        this.currentQuiz.page.questions.forEach((q, idx) => {
+            const row = document.createElement('div');
+            row.className = 'verify-question-row';
+            row.dataset.questionIndex = idx;
+
+            const correctAnswerText = q.options[q.answer];
+
+            row.innerHTML = `
+                <div class="verify-q-num">${idx + 1}</div>
+                <div class="verify-q-text">${q.q}</div>
+                <div class="verify-q-answer">答案: ${correctAnswerText}</div>
+                <div class="verify-q-buttons">
+                    <button class="verify-btn-check" data-idx="${idx}" onclick="Game.markVerify(${idx}, true)">✓</button>
+                    <button class="verify-btn-cross" data-idx="${idx}" onclick="Game.markVerify(${idx}, false)">✗</button>
+                </div>
+            `;
+            verifyQuestionsEl.appendChild(row);
+        });
+
+        // 初始化核对状态
+        this._verifyResults = new Array(this.currentQuiz.totalQuestions).fill(null);
+
+        // 默认隐藏"全部正确"按钮（等所有题都标记后才显示）
+        document.getElementById('verifyAllCorrectBtn').classList.add('hidden');
+        document.getElementById('verifyHasWrongBtn').classList.remove('hidden');
+    },
+
+    // 标记单题核对结果
+    markVerify(questionIdx, isCorrect) {
+        this._verifyResults[questionIdx] = isCorrect;
+
+        // 更新按钮视觉状态
+        const row = document.querySelector(`.verify-question-row[data-question-index="${questionIdx}"]`);
+        const checkBtn = row.querySelector('.verify-btn-check');
+        const crossBtn = row.querySelector('.verify-btn-cross');
+
+        // 重置两个按钮
+        checkBtn.classList.remove('marked-correct');
+        crossBtn.classList.remove('marked-wrong');
+        row.classList.remove('all-correct', 'has-wrong');
+
+        if (isCorrect) {
+            checkBtn.classList.add('marked-correct');
+            row.classList.add('all-correct');
+        } else {
+            crossBtn.classList.add('marked-wrong');
+            row.classList.add('has-wrong');
+        }
+
+        // 检查是否所有题都已标记
+        const allMarked = this._verifyResults.every(r => r !== null);
+        if (allMarked) {
+            const allCorrect = this._verifyResults.every(r => r === true);
+            if (allCorrect) {
+                document.getElementById('verifyAllCorrectBtn').classList.remove('hidden');
+            } else {
+                document.getElementById('verifyAllCorrectBtn').classList.add('hidden');
+            }
+        } else {
+            // 还没全部标记完，隐藏"全部正确"按钮
+            document.getElementById('verifyAllCorrectBtn').classList.add('hidden');
+        }
+    },
+
+    // 全部正确 → 发放奖励
+    verifyAllCorrect() {
+        this.currentQuiz.correctCount = this.currentQuiz.totalQuestions;
+        this.finishOfflineQuiz(true);
+    },
+
+    // 有错误 → 不奖励，可重试
+    verifyHasWrong() {
+        const wrongCount = this._verifyResults.filter(r => r === false).length;
+        this.showToast(`❌ 有${wrongCount}道题答错了，请在本子上改正后重新拍照核对`, 'danger');
+        this.finishOfflineQuiz(false);
+    },
+
+    // 完成离线测验
+    finishOfflineQuiz(success) {
+        if (success) {
+            // 与在线模式 finishQuiz() 使用相同的奖励逻辑
+            const q = this.currentQuiz;
+            const subjectKey = q.subjectKey;
+            const lane = this.state.lanes.find(l => l.subject === subjectKey);
+            const subject = CURRICULUM[subjectKey];
+
+            // 离线模式下，全部正确才给奖励（与在线一致）
+            const baseReward = GAME_CONFIG.taskReward;
+            const bonusReward = q.correctCount * GAME_CONFIG.correctAnswerBonus;
+            const totalReward = baseReward + bonusReward;
+
+            this.state.sun += totalReward;
+            this.state.tasksCompleted[subjectKey] = true;
+            lane.currentPage++;
+            this.state.totalCompletedPages++;
+
+            // 检查科目通关
+            if (lane.currentPage >= GAME_CONFIG.pagesPerSubject) {
+                this.state.subjectCompleted[subjectKey] = true;
+            }
+
+            this.checkUnlocks();
+            this.saveState();
+
+            // 关闭弹窗
+            document.getElementById('offlineModal').classList.add('hidden');
+
+            // 播放攻击效果（与在线模式一致）
+            setTimeout(() => {
+                this.renderAll();
+                if (this.state.subjectCompleted[subjectKey]) {
+                    this.subjectComplete(subjectKey);
+                } else {
+                    this.zombieTakeDamage(subjectKey, q.correctCount + 2);
+                }
+                this.showToast(`🎉 完成${subject.name}！获得${totalReward}阳光！`, 'success');
+            }, 300);
+        } else {
+            // 失败：关闭核对弹窗，回到阶段1重新做题
+            document.getElementById('offlinePhase3').classList.add('hidden');
+            document.getElementById('offlineModal').classList.add('hidden');
+
+            // 清除照片数据
+            this._capturedPhotoDataURL = null;
+            this._verifyResults = null;
+
+            // 重新打开离线测验（同一科目同一页）
+            setTimeout(() => {
+                this.startOfflineQuiz(this.currentQuiz.subjectKey);
+            }, 200);
+        }
+    },
+
+    // 取消离线测验
+    cancelOffline() {
+        this.stopCamera();
+        this._capturedPhotoDataURL = null;
+        this._verifyResults = null;
+        this.currentQuiz = null;
+        document.getElementById('offlineModal').classList.add('hidden');
     },
 
     // ==================== 僵尸系统 ====================
@@ -806,3 +1161,8 @@ const Game = {
 
 // 自动加载存档
 Game.init();
+
+// 页面关闭时清理相机流
+window.addEventListener('beforeunload', () => {
+    Game.stopCamera();
+});

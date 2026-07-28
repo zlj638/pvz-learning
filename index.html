@@ -24,6 +24,18 @@
             <li>💀 连续不做任务，僵尸会<strong>吃掉植物</strong>，植物全灭则游戏结束</li>
         </ul>
     </div>
+    <div class="mode-selector" id="modeSelector">
+        <div class="mode-option active" id="modeOnline" onclick="Game.setMode('online')">
+            <div class="mode-icon">📱</div>
+            <div class="mode-label">在线答题</div>
+            <div class="mode-desc">在手机上直接选答案</div>
+        </div>
+        <div class="mode-option" id="modeOffline" onclick="Game.setMode('offline')">
+            <div class="mode-icon">📝</div>
+            <div class="mode-label">线下书写</div>
+            <div class="mode-desc">在本子上写答案，拍照核对</div>
+        </div>
+    </div>
     <button class="btn btn-primary btn-lg" onclick="Game.start()">
         🎮 开始冒险
     </button>
@@ -42,6 +54,10 @@
             <span>第</span>
             <span class="value" id="dayCount">1</span>
             <span>天</span>
+        </div>
+        <div class="status-item mode-indicator" id="modeIndicator" onclick="Game.toggleMode()">
+            <span class="icon" id="modeIndicatorIcon">📱</span>
+            <span class="mode-text" id="modeIndicatorText">在线</span>
         </div>
         <div class="status-item">
             <button class="btn btn-warning" style="padding:6px 16px; font-size:14px;" onclick="Game.endDay()">
@@ -79,6 +95,63 @@
             <div class="quiz-reward hidden" id="quizReward"></div>
             <button class="btn btn-primary hidden" id="quizNextBtn" onclick="Game.nextQuestion()">下一题 →</button>
             <button class="btn btn-success hidden" id="quizFinishBtn" onclick="Game.finishQuiz()">完成！🎉</button>
+        </div>
+    </div>
+</div>
+
+<!-- ==================== 离线书写弹窗 ==================== -->
+<div id="offlineModal" class="modal-overlay hidden">
+    <div class="modal offline-modal-content">
+        <!-- 阶段1：展示题目 -->
+        <div id="offlinePhase1" class="offline-phase">
+            <div class="modal-title" id="offlineTitle">📝 线下书写模式</div>
+            <div class="offline-instructions">
+                请让孩子在本子上写下每道题的答案，写完后点击"拍照核对"
+            </div>
+            <div class="offline-questions" id="offlineQuestions"></div>
+            <button class="btn btn-primary btn-lg offline-camera-btn" id="offlineCameraBtn" onclick="Game.openCamera()">
+                📸 拍照核对
+            </button>
+            <button class="btn btn-info offline-album-btn" id="offlineAlbumBtn" onclick="Game.selectPhotoFromAlbum()">
+                🖼️ 从相册选择照片
+            </button>
+        </div>
+
+        <!-- 阶段2：拍照 -->
+        <div id="offlinePhase2" class="offline-phase hidden">
+            <div class="modal-title">📸 拍摄孩子的答案</div>
+            <div class="camera-container" id="cameraContainer">
+                <video id="cameraVideo" autoplay playsinline></video>
+                <canvas id="cameraCanvas" class="hidden"></canvas>
+            </div>
+            <div class="camera-controls">
+                <button class="btn btn-primary btn-lg" id="captureBtn" onclick="Game.capturePhoto()">
+                    📷 拍照
+                </button>
+                <button class="btn btn-danger" onclick="Game.cancelOffline()">
+                    ✖ 取消
+                </button>
+            </div>
+        </div>
+
+        <!-- 阶段3：核对答案 -->
+        <div id="offlinePhase3" class="offline-phase hidden">
+            <div class="modal-title">✅ 核对答案</div>
+            <div class="verify-layout">
+                <div class="verify-photo" id="verifyPhoto">
+                    <img id="verifyPhotoImg" src="" alt="答案照片">
+                    <div class="photo-placeholder" id="photoPlaceholder">照片加载中...</div>
+                </div>
+                <div class="verify-questions" id="verifyQuestions"></div>
+            </div>
+            <div class="verify-actions" id="verifyActions">
+                <button class="btn btn-success btn-lg" id="verifyAllCorrectBtn" onclick="Game.verifyAllCorrect()">
+                    ✅ 全部正确，获得阳光！
+                </button>
+                <button class="btn btn-danger" id="verifyHasWrongBtn" onclick="Game.verifyHasWrong()">
+                    ❌ 有错误，需要重做
+                </button>
+            </div>
         </div>
     </div>
 </div>
