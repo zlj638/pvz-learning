@@ -505,7 +505,7 @@ const Game = {
 
     // ==================== 离线书写模式（OCR 自动识别） ====================
 
-    // 阶段1：展示题目和正确答案示例
+    // 阶段1：展示题目和选项，让孩子自己判断正确答案并书写
     startOfflineQuiz(subjectKey) {
         const subject = CURRICULUM[subjectKey];
         const lane = this.state.lanes.find(l => l.subject === subjectKey);
@@ -513,24 +513,28 @@ const Game = {
 
         document.getElementById('offlineTitle').innerHTML = `${subject.icon} ${subject.name} - ${page.title}`;
 
-        // 生成正确答案示例（一行）
+        // 生成正确答案示例（一行，仅作为书写格式参考）
         const correctAnswers = page.questions.map(q => q.options[q.answer]);
         document.getElementById('offlineFormatExample').innerHTML = correctAnswers.join(' &nbsp;&nbsp; ');
 
-        // 生成题目列表（显示题号、题目文字、要写的正确答案）
+        // 生成题目列表（显示题号、题目文字、A/B/C/D 选项，但不揭示正确答案）
         const questionsEl = document.getElementById('offlineQuestions');
         questionsEl.innerHTML = '';
 
         page.questions.forEach((q, idx) => {
             const item = document.createElement('div');
             item.className = 'offline-question-item';
-            const correctAnswer = q.options[q.answer];
+
+            const optionsHtml = q.options.map((opt, oIdx) => {
+                const label = String.fromCharCode(65 + oIdx);
+                return `<span class="offline-option"><b>${label}.</b> ${opt}</span>`;
+            }).join('');
 
             item.innerHTML = `
                 <div class="offline-question-num">${idx + 1}</div>
                 <div class="offline-question-text">
                     <div class="offline-question-stem">${q.q}</div>
-                    <div class="offline-answer-hint">✏️ 写这个：<b>${correctAnswer}</b></div>
+                    <div class="offline-options-list">${optionsHtml}</div>
                 </div>
             `;
             questionsEl.appendChild(item);
