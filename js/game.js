@@ -551,6 +551,7 @@ const Game = {
     // 阶段2：打开相机
     async openCamera() {
         document.getElementById('offlinePhase1').classList.add('hidden');
+        document.getElementById('offlinePhase3').classList.add('hidden');
         document.getElementById('offlinePhase2').classList.remove('hidden');
 
         const video = document.getElementById('cameraVideo');
@@ -624,10 +625,19 @@ const Game = {
 
     // 重拍（回到相机预览）
     retakePhoto() {
+        // 终止正在运行的 OCR worker
+        if (this._tesseractWorker) {
+            this._tesseractWorker.terminate();
+            this._tesseractWorker = null;
+        }
         // 清除已拍照片和识别结果
         this._capturedPhotoDataURL = null;
         this._verifyResults = null;
         this._recognizedText = '';
+
+        // 清空识别结果区域，防止显示旧数据
+        document.getElementById('verifyQuestions').innerHTML = '';
+        document.getElementById('ocrStatus').classList.add('hidden');
 
         // 重新打开相机
         this.openCamera();
@@ -695,6 +705,12 @@ const Game = {
     // 启动 Tesseract.js 进行 OCR 识别
     async startOCR() {
         const statusText = document.getElementById('ocrStatusText');
+
+        // 先终止可能还在运行的上一个 worker（防止重拍后旧识别结果残留）
+        if (this._tesseractWorker) {
+            try { await this._tesseractWorker.terminate(); } catch (e) { /* ignore */ }
+            this._tesseractWorker = null;
+        }
 
         // 检查 Tesseract.js 是否加载成功
         if (typeof Tesseract === 'undefined') {
