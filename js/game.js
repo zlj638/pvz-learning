@@ -505,7 +505,7 @@ const Game = {
 
     // ==================== 离线书写模式 ====================
 
-    // 阶段1：展示题目
+    // 阶段1：展示题目（含选项 A/B/C/D）
     startOfflineQuiz(subjectKey) {
         const subject = CURRICULUM[subjectKey];
         const lane = this.state.lanes.find(l => l.subject === subjectKey);
@@ -513,18 +513,25 @@ const Game = {
 
         document.getElementById('offlineTitle').innerHTML = `${subject.icon} ${subject.name} - ${page.title}`;
 
-        // 生成题目列表（只显示题号和题目文字，不显示选项）
+        // 生成题目列表（显示题号、题目文字、选项 A/B/C/D）
         const questionsEl = document.getElementById('offlineQuestions');
         questionsEl.innerHTML = '';
 
         page.questions.forEach((q, idx) => {
             const item = document.createElement('div');
             item.className = 'offline-question-item';
+
+            // 生成选项 A/B/C/D
+            const optionsHtml = q.options.map((opt, oIdx) => {
+                const label = String.fromCharCode(65 + oIdx); // A, B, C, D
+                return `<span class="offline-option"><b>${label}.</b> ${opt}</span>`;
+            }).join('');
+
             item.innerHTML = `
                 <div class="offline-question-num">${idx + 1}</div>
                 <div class="offline-question-text">
-                    ${q.q}
-                    <div class="offline-question-hint">请在本子上写出答案</div>
+                    <div class="offline-question-stem">${q.q}</div>
+                    <div class="offline-options-list">${optionsHtml}</div>
                 </div>
             `;
             questionsEl.appendChild(item);
@@ -649,7 +656,7 @@ const Game = {
         input.click();
     },
 
-    // 阶段3：核对答案
+    // 阶段3：核对答案（家长对照照片，逐题点选孩子写的答案）
     showVerifyPhase() {
         document.getElementById('offlinePhase2').classList.add('hidden');
         document.getElementById('offlinePhase3').classList.remove('hidden');
@@ -668,72 +675,97 @@ const Game = {
             placeholder.classList.remove('hidden');
         }
 
-        // 生成核对列表：题号 + 题目 + 正确答案 + ✓/✗ 按钮
+        // 生成核对列表：每题显示选项按钮，家长点选孩子写的答案
         const verifyQuestionsEl = document.getElementById('verifyQuestions');
         verifyQuestionsEl.innerHTML = '';
+
+        this._verifyResults = new Array(this.currentQuiz.totalQuestions).fill(null);
 
         this.currentQuiz.page.questions.forEach((q, idx) => {
             const row = document.createElement('div');
             row.className = 'verify-question-row';
             row.dataset.questionIndex = idx;
 
-            const correctAnswerText = q.options[q.answer];
+            // 生成选项按钮 A/B/C/D
+            const optionsHtml = q.options.map((opt, oIdx) => {
+                const label = String.fromCharCode(65 + oIdx);
+                return `<button class="verify-option-btn" data-qidx="${idx}" data-oidx="${oIdx}" onclick="Game.selectVerifyAnswer(${idx}, ${oIdx})">${label}. ${opt}</button>`;
+            }).join('');
 
             row.innerHTML = `
                 <div class="verify-q-num">${idx + 1}</div>
-                <div class="verify-q-text">${q.q}</div>
-                <div class="verify-q-answer">答案: ${correctAnswerText}</div>
-                <div class="verify-q-buttons">
-                    <button class="verify-btn-check" data-idx="${idx}" onclick="Game.markVerify(${idx}, true)">✓</button>
-                    <button class="verify-btn-cross" data-idx="${idx}" onclick="Game.markVerify(${idx}, false)">✗</button>
+                <div class="verify-q-content">
+                    <div class="verify-q-text">${q.q}</div>
+                    <div class="verify-q-options">${optionsHtml}</div>
+                    <div class="verify-q-result hidden"></div>
                 </div>
             `;
             verifyQuestionsEl.appendChild(row);
         });
 
-        // 初始化核对状态
-        this._verifyResults = new Array(this.currentQuiz.totalQuestions).fill(null);
-
-        // 默认隐藏"全部正确"按钮（等所有题都标记后才显示）
+        // 隐藏操作按钮（等所有题都选完才显示）
         document.getElementById('verifyAllCorrectBtn').classList.add('hidden');
-        document.getElementById('verifyHasWrongBtn').classList.remove('hidden');
+        document.getElementById('verifyHasWrongBtn').classList.add('hidden');
     },
 
-    // 标记单题核对结果
-    markVerify(questionIdx, isCorrect) {
+    // 家长点选孩子写的答案（系统自动判断对错）
+    selectVerifyAnswer(questionIdx, selectedOptionIdx) {
+        const q = this.currentQuiz.page.questions[questionIdx];
+        const isCorrect = selectedOptionIdx === q.answer;
         this._verifyResults[questionIdx] = isCorrect;
 
-        // 更新按钮视觉状态
+        // 更新 UI
         const row = document.querySelector(`.verify-question-row[data-question-index="${questionIdx}"]`);
-        const checkBtn = row.querySelector('.verify-btn-check');
-        const crossBtn = row.querySelector('.verify-btn-cross');
+        const buttons = row.querySelectorAll('.verify-option-btn');
+        const resultEl = row.querySelector('.verify-q-result');
 
-        // 重置两个按钮
-        checkBtn.classList.remove('marked-correct');
-        crossBtn.classList.remove('marked-wrong');
-        row.classList.remove('all-correct', 'has-wrong');
+        // 重置所有按钮状态
+        buttons.forEach(btn => {
+            btn.classList.remove('selected', 'correct-answer', 'wrong-answer');
+        });
+
+        // 标记选中的按钮
+        buttons[selectedOptionIdx].classList.add('selected');
 
         if (isCorrect) {
-            checkBtn.classList.add('marked-correct');
-            row.classList.add('all-correct');
+            buttons[selectedOptionIdx].classList.add('correct-answer');
+            resultEl.textContent = '✅ 正确！';
+            resultEl.className = 'verify-q-result correct';
         } else {
-            crossBtn.classList.add('marked-wrong');
-            row.classList.add('has-wrong');
+            buttons[selectedOptionIdx].classList.add('wrong-answer');
+            // 同时高亮正确答案
+            buttons[q.answer].classList.add('correct-answer');
+            resultEl.innerHTML = `❌ 错误！正确答案：${String.fromCharCode(65 + q.answer)}`;
+            resultEl.className = 'verify-q-result wrong';
         }
 
-        // 检查是否所有题都已标记
-        const allMarked = this._verifyResults.every(r => r !== null);
-        if (allMarked) {
+        resultEl.classList.remove('hidden');
+
+        // 检查是否所有题都已回答
+        const allAnswered = this._verifyResults.every(r => r !== null);
+        if (allAnswered) {
             const allCorrect = this._verifyResults.every(r => r === true);
             if (allCorrect) {
                 document.getElementById('verifyAllCorrectBtn').classList.remove('hidden');
+                document.getElementById('verifyHasWrongBtn').classList.add('hidden');
             } else {
                 document.getElementById('verifyAllCorrectBtn').classList.add('hidden');
+                document.getElementById('verifyHasWrongBtn').classList.remove('hidden');
             }
         } else {
-            // 还没全部标记完，隐藏"全部正确"按钮
             document.getElementById('verifyAllCorrectBtn').classList.add('hidden');
+            document.getElementById('verifyHasWrongBtn').classList.add('hidden');
         }
+    },
+
+    // 放大查看照片
+    zoomPhoto() {
+        if (!this._capturedPhotoDataURL) return;
+        const overlay = document.createElement('div');
+        overlay.className = 'photo-zoom-overlay';
+        overlay.innerHTML = `<img src="${this._capturedPhotoDataURL}" alt="放大查看"><div class="photo-zoom-hint">👆 点击任意处关闭</div>`;
+        overlay.onclick = () => overlay.remove();
+        document.body.appendChild(overlay);
     },
 
     // 全部正确 → 发放奖励

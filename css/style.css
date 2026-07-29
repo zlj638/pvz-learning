@@ -800,11 +800,41 @@ html, body {
     font-size: 15px;
     color: #5D4037;
     text-align: center;
-    margin: 8px 0 16px;
+    margin: 8px 0 12px;
     background: #FFF3E0;
     padding: 12px;
     border-radius: var(--radius);
     border: 2px solid #FFE0B2;
+}
+
+/* 书写格式指引 */
+.offline-format-guide {
+    background: #E3F2FD;
+    border: 2px solid #90CAF9;
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    margin-bottom: 12px;
+    text-align: center;
+}
+
+.format-guide-title {
+    font-size: 14px;
+    font-weight: bold;
+    color: #1565C0;
+    margin-bottom: 6px;
+}
+
+.format-guide-example {
+    font-size: 20px;
+    font-weight: bold;
+    color: #0D47A1;
+    letter-spacing: 2px;
+    padding: 6px 0;
+}
+
+.format-guide-hint {
+    font-size: 12px;
+    color: #546E7A;
 }
 
 /* 题目展示列表 */
@@ -834,17 +864,32 @@ html, body {
 }
 
 .offline-question-text {
-    font-size: 18px;
-    font-weight: bold;
+    font-size: 16px;
     color: #3E2723;
     line-height: 1.5;
     flex: 1;
 }
 
-.offline-question-hint {
-    font-size: 13px;
-    color: #9E9E9E;
+.offline-question-stem {
+    font-size: 17px;
+    font-weight: bold;
+    margin-bottom: 6px;
+}
+
+.offline-options-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
     margin-top: 4px;
+}
+
+.offline-option {
+    font-size: 14px;
+    color: #5D4037;
+    background: #F5F5F5;
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: 1px solid #E0E0E0;
 }
 
 /* 拍照按钮 */
@@ -915,6 +960,18 @@ html, body {
 }
 
 /* ==================== 核对答案 ==================== */
+.verify-instruction {
+    font-size: 15px;
+    color: #1565C0;
+    text-align: center;
+    margin-bottom: 12px;
+    background: #E3F2FD;
+    padding: 10px;
+    border-radius: var(--radius);
+    border: 2px solid #90CAF9;
+    font-weight: bold;
+}
+
 .verify-layout {
     display: flex;
     flex-direction: column;
@@ -925,16 +982,17 @@ html, body {
     background: #000;
     border-radius: var(--radius);
     overflow: hidden;
-    max-height: 200px;
+    max-height: 220px;
     position: relative;
 }
 
 .verify-photo img {
     width: 100%;
     height: auto;
-    max-height: 200px;
+    max-height: 220px;
     object-fit: contain;
     display: block;
+    cursor: zoom-in;
 }
 
 .photo-placeholder {
@@ -946,21 +1004,31 @@ html, body {
     font-size: 14px;
 }
 
+.verify-retake-btn {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    padding: 4px 12px;
+    font-size: 13px;
+    z-index: 5;
+    opacity: 0.9;
+}
+
 .verify-questions {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
 }
 
 .verify-question-row {
     display: flex;
-    align-items: center;
     gap: 8px;
     padding: 10px 12px;
     background: #fff;
     border-radius: var(--radius);
     box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-    font-size: 15px;
+    border-left: 4px solid #E0E0E0;
+    transition: border-color 0.3s;
 }
 
 .verify-q-num {
@@ -968,90 +1036,77 @@ html, body {
     font-weight: bold;
     color: #FF9800;
     min-width: 24px;
+    flex-shrink: 0;
+}
+
+.verify-q-content {
+    flex: 1;
+    min-width: 0;
 }
 
 .verify-q-text {
-    flex: 1;
     font-size: 15px;
     color: #3E2723;
     line-height: 1.3;
-}
-
-.verify-q-answer {
-    font-size: 15px;
+    margin-bottom: 6px;
     font-weight: bold;
-    color: #4CAF50;
-    background: #E8F5E9;
-    padding: 4px 10px;
+}
+
+.verify-q-options {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.verify-option-btn {
+    padding: 8px 12px;
+    background: #FAFAFA;
+    border: 2px solid #E0E0E0;
     border-radius: 8px;
-    white-space: nowrap;
-}
-
-.verify-q-buttons {
-    display: flex;
-    gap: 4px;
-}
-
-.verify-btn-check {
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    border: 2px solid #4CAF50;
-    background: #fff;
-    color: #4CAF50;
-    font-size: 20px;
+    font-size: 14px;
+    color: #424242;
     cursor: pointer;
     transition: all 0.2s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    text-align: left;
+    font-family: var(--font-main);
+    line-height: 1.3;
 }
 
-.verify-btn-check:hover {
-    background: #4CAF50;
-    color: #fff;
+.verify-option-btn:hover {
+    border-color: #FF9800;
+    background: #FFF3E0;
 }
 
-.verify-btn-check.marked-correct {
-    background: #4CAF50;
-    color: #fff;
+.verify-option-btn.correct-answer {
+    background: #C8E6C9;
     border-color: #4CAF50;
+    color: #2E7D32;
+    font-weight: bold;
 }
 
-.verify-btn-cross {
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    border: 2px solid #F44336;
-    background: #fff;
-    color: #F44336;
-    font-size: 20px;
-    cursor: pointer;
-    transition: all 0.2s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.verify-btn-cross:hover {
-    background: #F44336;
-    color: #fff;
-}
-
-.verify-btn-cross.marked-wrong {
-    background: #F44336;
-    color: #fff;
+.verify-option-btn.wrong-answer {
+    background: #FFCDD2;
     border-color: #F44336;
+    color: #C62828;
+    text-decoration: line-through;
 }
 
-.verify-question-row.all-correct {
+.verify-q-result {
+    font-size: 14px;
+    font-weight: bold;
+    margin-top: 4px;
+    padding: 4px 8px;
+    border-radius: 6px;
+}
+
+.verify-q-result.correct {
+    color: #2E7D32;
     background: #E8F5E9;
-    border-left: 4px solid #4CAF50;
 }
 
-.verify-question-row.has-wrong {
+.verify-q-result.wrong {
+    color: #C62828;
     background: #FFEBEE;
-    border-left: 4px solid #F44336;
 }
 
 .verify-actions {
@@ -1063,6 +1118,42 @@ html, body {
 
 .verify-actions .btn {
     flex: 1;
+}
+
+/* 照片放大遮罩 */
+.photo-zoom-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.9);
+    z-index: 5000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    animation: fadeIn 0.2s ease;
+}
+
+.photo-zoom-overlay img {
+    max-width: 95%;
+    max-height: 85vh;
+    border-radius: 8px;
+    box-shadow: 0 0 30px rgba(255,255,255,0.2);
+}
+
+.photo-zoom-hint {
+    color: #fff;
+    font-size: 14px;
+    margin-top: 16px;
+    opacity: 0.7;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
 }
 
 /* ==================== 开始画面 ==================== */
@@ -1361,20 +1452,32 @@ html, body {
         font-size: 11px;
     }
     .offline-question-text {
-        font-size: 16px;
+        font-size: 14px;
+    }
+    .offline-question-stem {
+        font-size: 15px;
+    }
+    .offline-option {
+        font-size: 13px;
     }
     .camera-container {
         max-height: 250px;
     }
     .verify-photo {
-        max-height: 160px;
+        max-height: 180px;
+    }
+    .verify-photo img {
+        max-height: 180px;
     }
     .verify-q-text {
         font-size: 13px;
     }
-    .verify-q-answer {
+    .verify-option-btn {
         font-size: 13px;
-        padding: 3px 8px;
+        padding: 6px 10px;
+    }
+    .verify-instruction {
+        font-size: 13px;
     }
 }
 
@@ -1417,9 +1520,19 @@ html, body {
         gap: 8px;
     }
     .offline-question-text {
+        font-size: 13px;
+    }
+    .offline-question-stem {
         font-size: 14px;
     }
-    .verify-q-answer {
+    .offline-option {
+        font-size: 12px;
+    }
+    .verify-option-btn {
+        font-size: 12px;
+        padding: 5px 8px;
+    }
+    .verify-q-text {
         font-size: 12px;
     }
 }

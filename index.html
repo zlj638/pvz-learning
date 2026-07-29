@@ -106,7 +106,12 @@
         <div id="offlinePhase1" class="offline-phase">
             <div class="modal-title" id="offlineTitle">📝 线下书写模式</div>
             <div class="offline-instructions">
-                请让孩子在本子上写下每道题的答案，写完后点击"拍照核对"
+                请让孩子在本子上按格式写出答案序号，写完后点击"拍照核对"
+            </div>
+            <div class="offline-format-guide">
+                <div class="format-guide-title">📝 书写格式示例：</div>
+                <div class="format-guide-example">1.A &nbsp;&nbsp; 2.C &nbsp;&nbsp; 3.B &nbsp;&nbsp; 4.D</div>
+                <div class="format-guide-hint">在纸上写清题号和对应字母即可</div>
             </div>
             <div class="offline-questions" id="offlineQuestions"></div>
             <button class="btn btn-primary btn-lg offline-camera-btn" id="offlineCameraBtn" onclick="Game.openCamera()">
@@ -137,10 +142,12 @@
         <!-- 阶段3：核对答案 -->
         <div id="offlinePhase3" class="offline-phase hidden">
             <div class="modal-title">✅ 核对答案</div>
+            <div class="verify-instruction">👆 请对照照片，逐题点击孩子写的答案</div>
             <div class="verify-layout">
                 <div class="verify-photo" id="verifyPhoto">
-                    <img id="verifyPhotoImg" src="" alt="答案照片">
+                    <img id="verifyPhotoImg" src="" alt="答案照片" onclick="Game.zoomPhoto()">
                     <div class="photo-placeholder" id="photoPlaceholder">照片加载中...</div>
+                    <button class="btn btn-info verify-retake-btn" onclick="Game.retakePhoto()">🔄 重拍</button>
                 </div>
                 <div class="verify-questions" id="verifyQuestions"></div>
             </div>
