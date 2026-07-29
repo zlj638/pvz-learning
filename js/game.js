@@ -592,7 +592,7 @@ const Game = {
     },
 
     // 拍照截取
-    capturePhoto() {
+    async capturePhoto() {
         const video = document.getElementById('cameraVideo');
         const canvas = document.getElementById('cameraCanvas');
 
@@ -608,7 +608,8 @@ const Game = {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
         // 保存照片数据
-        this._capturedPhotoDataURL = canvas.toDataURL('image/jpeg', 0.85);
+        const rawDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        this._capturedPhotoDataURL = await this.preprocessImage(rawDataUrl);
 
         // 播放闪光效果
         const flash = document.createElement('div');
@@ -651,17 +652,76 @@ const Game = {
         }
     },
 
+    // 图像预处理：灰度化、对比度增强、二值化，提升手写文字识别率
+    preprocessImage(dataUrl) {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                const maxSize = 1600;
+                let w = img.width;
+                let h = img.height;
+                if (w > maxSize || h > maxSize) {
+                    const ratio = Math.min(maxSize / w, maxSize / h);
+                    w = Math.round(w * ratio);
+                    h = Math.round(h * ratio);
+                }
+                canvas.width = w;
+                canvas.height = h;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, w, h);
+
+                try {
+                    const imgData = ctx.getImageData(0, 0, w, h);
+                    const data = imgData.data;
+
+                    // 第一步：灰度化并增强对比度
+                    for (let i = 0; i < data.length; i += 4) {
+                        const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+                        // 增强对比度：让深色更深，浅色更浅
+                        let enhanced = (gray - 128) * 1.5 + 128;
+                        enhanced = Math.max(0, Math.min(255, enhanced));
+                        data[i] = data[i + 1] = data[i + 2] = enhanced;
+                    }
+
+                    // 第二步：Otsu-like 自适应二值化
+                    // 先计算平均亮度
+                    let sum = 0;
+                    for (let i = 0; i < data.length; i += 4) {
+                        sum += data[i];
+                    }
+                    const threshold = sum / (data.length / 4);
+
+                    for (let i = 0; i < data.length; i += 4) {
+                        const val = data[i] < threshold ? 0 : 255;
+                        data[i] = data[i + 1] = data[i + 2] = val;
+                    }
+
+                    ctx.putImageData(imgData, 0, 0);
+                    resolve(canvas.toDataURL('image/jpeg', 0.9));
+                } catch (e) {
+                    // 预处理失败时返回原图
+                    resolve(dataUrl);
+                }
+            };
+            img.onerror = () => resolve(dataUrl);
+            img.src = dataUrl;
+        });
+    },
+
     // 降级方法：从相册/文件选择照片
     selectPhotoFromAlbum() {
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = 'image/*';
-        input.onchange = (e) => {
+        input.onchange = async (e) => {
             const file = e.target.files[0];
             if (!file) return;
             const reader = new FileReader();
-            reader.onload = (ev) => {
-                this._capturedPhotoDataURL = ev.target.result;
+            reader.onload = async (ev) => {
+                const rawDataUrl = ev.target.result;
+                this._capturedPhotoDataURL = await this.preprocessImage(rawDataUrl);
                 // 隐藏阶段1，直接进入核对阶段
                 document.getElementById('offlinePhase1').classList.add('hidden');
                 this.showVerifyPhase();
@@ -734,11 +794,24 @@ const Game = {
                 }
             });
 
+            // 设置 OCR 参数：把图像当作单个文本块，提高手写/多行识别率
+            await this._tesseractWorker.setParameters({
+                tessedit_pageseg_mode: '6',
+                preserve_interword_spaces: '1'
+            });
+
             const result = await this._tesseractWorker.recognize(this._capturedPhotoDataURL);
             await this._tesseractWorker.terminate();
             this._tesseractWorker = null;
 
             this._recognizedText = result.data.text || '';
+            // 记录平均置信度，用于判断是否需要提示手动核对
+            const words = result.data.words || [];
+            const confidences = words.map(w => w.confidence || 0).filter(c => c > 0);
+            this._ocrConfidence = confidences.length
+                ? Math.round(confidences.reduce((a, b) => a + b, 0) / confidences.length)
+                : 0;
+
             this.processOCRResult(this._recognizedText);
         } catch (err) {
             console.error('OCR识别失败:', err);
@@ -747,7 +820,41 @@ const Game = {
         }
     },
 
-    // 处理 OCR 结果：清理文本并按顺序匹配每道题的正确答案
+    // 常见 OCR 误识别映射（手写 / 印刷体混淆）
+    getOCRConfusions() {
+        return {
+            'a': ['a', 'o', 'e', 'd', 'q'],
+            'o': ['o', 'a', 'e', 'c', '0'],
+            'e': ['e', 'c', 'o', 'a'],
+            'i': ['i', 'l', 'j', '1'],
+            'u': ['u', 'v', 'n'],
+            'b': ['b', '6', '8'],
+            'p': ['p', 'q', '9'],
+            '啊': ['啊', '阿', '女', '口', '哪', '那'],
+            '哦': ['哦', '我', '饿', '鹅', '俄', '蛾'],
+            '鹅': ['鹅', '饿', '哦', '我', '俄', '蛾'],
+            '饿': ['饿', '鹅', '哦', '我', '俄'],
+            '我': ['我', '哦', '饿', '鹅'],
+            '一': ['一', '二', '三', '—', '-', '1'],
+            '二': ['二', '一', '三'],
+            '三': ['三', '二', '一'],
+            '大': ['大', '太', '犬', '天'],
+            '小': ['小', '少', '水'],
+            '人': ['人', '入', '八'],
+            '口': ['口', '日', '曰', '中'],
+            '日': ['日', '曰', '口', '白'],
+            '目': ['目', '日', '月'],
+            '木': ['木', '本', '术'],
+            '本': ['本', '木', '术'],
+            '王': ['王', '玉', '主'],
+            '土': ['土', '士', '干'],
+            '上': ['上', '下', '土'],
+            '下': ['下', '上', '不'],
+            '天': ['天', '夫', '大', '太']
+        };
+    },
+
+    // 处理 OCR 结果：清理文本并按顺序匹配每道题的正确答案（支持模糊匹配）
     processOCRResult(rawText) {
         const recognized = this.cleanOCRText(rawText);
         const questions = this.currentQuiz.page.questions;
@@ -776,15 +883,52 @@ const Game = {
             .toLowerCase();                            // 英文统一小写
     },
 
-    // 在文本中查找答案并移除，避免重复匹配
+    // 在文本中查找答案并移除，支持模糊匹配
     findAndRemoveAnswer(text, answer) {
-        const idx = text.indexOf(answer);
+        // 1. 优先精确匹配
+        let idx = text.indexOf(answer);
         if (idx !== -1) {
             return {
                 found: true,
                 remaining: text.slice(0, idx) + text.slice(idx + answer.length)
             };
         }
+
+        // 2. 模糊匹配：利用常见 OCR 混淆字符表
+        const confusions = this.getOCRConfusions()[answer] || [answer];
+        // 优先匹配整个答案串，再逐个字符匹配
+        for (let i = 0; i <= text.length - answer.length; i++) {
+            const slice = text.slice(i, i + answer.length);
+            let allMatch = true;
+            for (let j = 0; j < answer.length; j++) {
+                const answerChar = answer[j];
+                const textChar = slice[j];
+                const charConfusions = this.getOCRConfusions()[answerChar] || [answerChar];
+                if (!charConfusions.includes(textChar)) {
+                    allMatch = false;
+                    break;
+                }
+            }
+            if (allMatch) {
+                return {
+                    found: true,
+                    remaining: text.slice(0, i) + text.slice(i + answer.length)
+                };
+            }
+        }
+
+        // 3. 单字符答案：在剩余文本中任找其一
+        if (answer.length === 1) {
+            for (let i = 0; i < text.length; i++) {
+                if (confusions.includes(text[i])) {
+                    return {
+                        found: true,
+                        remaining: text.slice(0, i) + text.slice(i + 1)
+                    };
+                }
+            }
+        }
+
         return { found: false, remaining: text };
     },
 
@@ -826,17 +970,24 @@ const Game = {
 
         // 更新状态提示
         document.getElementById('ocrStatus').classList.add('hidden');
+        const lowConfidence = (this._ocrConfidence || 0) < 50;
+        const confidenceHint = lowConfidence
+            ? '<br><span style="color:#E65100;font-size:13px;">⚠️ 识别置信度较低，建议点击「手动核对」</span>'
+            : '';
         document.getElementById('verifyInstructionText').innerHTML =
-            `识别完成！共 <b>${results.length}</b> 题，答对 <b>${correctCount}</b> 题`;
+            `识别完成！共 <b>${results.length}</b> 题，答对 <b>${correctCount}</b> 题${confidenceHint}`;
 
         // 显示操作按钮
         const allCorrect = results.every(r => r === true);
+        const manualBtn = document.getElementById('manualVerifyBtn');
         if (allCorrect) {
             document.getElementById('verifyAllCorrectBtn').classList.remove('hidden');
             document.getElementById('verifyHasWrongBtn').classList.add('hidden');
+            manualBtn.classList.add('hidden');
         } else {
             document.getElementById('verifyAllCorrectBtn').classList.add('hidden');
             document.getElementById('verifyHasWrongBtn').classList.remove('hidden');
+            manualBtn.classList.remove('hidden');
         }
     },
 
@@ -868,6 +1019,89 @@ const Game = {
         const wrongCount = this._verifyResults.filter(r => r === false).length;
         this.showToast(`❌ 有${wrongCount}道题没识别到或写错了，请在本子上改正后重新拍照核对`, 'danger');
         this.finishOfflineQuiz(false);
+    },
+
+    // 切换到手动核对（OCR 不准时的兜底方案）
+    switchToManualVerify() {
+        this._verifyResults = new Array(this.currentQuiz.totalQuestions).fill(null);
+        this.renderManualVerify();
+    },
+
+    // 渲染手动核对界面
+    renderManualVerify() {
+        const questions = this.currentQuiz.page.questions;
+        const container = document.getElementById('verifyQuestions');
+        container.innerHTML = '';
+
+        // 更新顶部提示
+        document.getElementById('verifyInstructionText').innerHTML =
+            '👆 请对照照片，逐题点击孩子写的答案';
+        document.getElementById('ocrStatus').classList.add('hidden');
+
+        questions.forEach((q, idx) => {
+            const row = document.createElement('div');
+            row.className = 'verify-question-row';
+            row.dataset.questionIndex = idx;
+
+            const optionsHtml = q.options.map((opt, oIdx) => {
+                const label = String.fromCharCode(65 + oIdx);
+                return `<button class="verify-option-btn" data-qidx="${idx}" data-oidx="${oIdx}" onclick="Game.selectManualAnswer(${idx}, ${oIdx})">${label}. ${opt}</button>`;
+            }).join('');
+
+            row.innerHTML = `
+                <div class="verify-q-num">${idx + 1}</div>
+                <div class="verify-q-content">
+                    <div class="verify-q-text">${q.q}</div>
+                    <div class="verify-q-options">${optionsHtml}</div>
+                    <div class="verify-q-result hidden"></div>
+                </div>
+            `;
+            container.appendChild(row);
+        });
+
+        // 隐藏自动识别的操作按钮，等待家长逐题点选
+        document.getElementById('verifyAllCorrectBtn').classList.add('hidden');
+        document.getElementById('verifyHasWrongBtn').classList.add('hidden');
+        document.getElementById('manualVerifyBtn').classList.add('hidden');
+    },
+
+    // 家长手动点选孩子写的答案
+    selectManualAnswer(questionIdx, selectedOptionIdx) {
+        const q = this.currentQuiz.page.questions[questionIdx];
+        const isCorrect = selectedOptionIdx === q.answer;
+        this._verifyResults[questionIdx] = isCorrect;
+
+        const row = document.querySelector(`.verify-question-row[data-question-index="${questionIdx}"]`);
+        const buttons = row.querySelectorAll('.verify-option-btn');
+        const resultEl = row.querySelector('.verify-q-result');
+
+        buttons.forEach(btn => btn.classList.remove('selected', 'correct-answer', 'wrong-answer'));
+        buttons[selectedOptionIdx].classList.add('selected');
+
+        if (isCorrect) {
+            buttons[selectedOptionIdx].classList.add('correct-answer');
+            resultEl.textContent = '✅ 正确！';
+            resultEl.className = 'verify-q-result correct';
+        } else {
+            buttons[selectedOptionIdx].classList.add('wrong-answer');
+            buttons[q.answer].classList.add('correct-answer');
+            resultEl.innerHTML = `❌ 错误！正确答案：${String.fromCharCode(65 + q.answer)}`;
+            resultEl.className = 'verify-q-result wrong';
+        }
+        resultEl.classList.remove('hidden');
+
+        const allAnswered = this._verifyResults.every(r => r !== null);
+        if (allAnswered) {
+            const allCorrect = this._verifyResults.every(r => r === true);
+            if (allCorrect) {
+                document.getElementById('verifyAllCorrectBtn').classList.remove('hidden');
+                document.getElementById('verifyHasWrongBtn').classList.add('hidden');
+            } else {
+                document.getElementById('verifyAllCorrectBtn').classList.add('hidden');
+                document.getElementById('verifyHasWrongBtn').classList.remove('hidden');
+            }
+            document.getElementById('manualVerifyBtn').classList.add('hidden');
+        }
     },
 
     // 完成离线测验
