@@ -503,9 +503,9 @@ const Game = {
         }, 2000);
     },
 
-    // ==================== 离线书写模式 ====================
+    // ==================== 离线书写模式（OCR 自动识别） ====================
 
-    // 阶段1：展示题目（含选项 A/B/C/D）
+    // 阶段1：展示题目和正确答案示例
     startOfflineQuiz(subjectKey) {
         const subject = CURRICULUM[subjectKey];
         const lane = this.state.lanes.find(l => l.subject === subjectKey);
@@ -513,25 +513,24 @@ const Game = {
 
         document.getElementById('offlineTitle').innerHTML = `${subject.icon} ${subject.name} - ${page.title}`;
 
-        // 生成题目列表（显示题号、题目文字、选项 A/B/C/D）
+        // 生成正确答案示例（一行）
+        const correctAnswers = page.questions.map(q => q.options[q.answer]);
+        document.getElementById('offlineFormatExample').innerHTML = correctAnswers.join(' &nbsp;&nbsp; ');
+
+        // 生成题目列表（显示题号、题目文字、要写的正确答案）
         const questionsEl = document.getElementById('offlineQuestions');
         questionsEl.innerHTML = '';
 
         page.questions.forEach((q, idx) => {
             const item = document.createElement('div');
             item.className = 'offline-question-item';
-
-            // 生成选项 A/B/C/D
-            const optionsHtml = q.options.map((opt, oIdx) => {
-                const label = String.fromCharCode(65 + oIdx); // A, B, C, D
-                return `<span class="offline-option"><b>${label}.</b> ${opt}</span>`;
-            }).join('');
+            const correctAnswer = q.options[q.answer];
 
             item.innerHTML = `
                 <div class="offline-question-num">${idx + 1}</div>
                 <div class="offline-question-text">
                     <div class="offline-question-stem">${q.q}</div>
-                    <div class="offline-options-list">${optionsHtml}</div>
+                    <div class="offline-answer-hint">✏️ 写这个：<b>${correctAnswer}</b></div>
                 </div>
             `;
             questionsEl.appendChild(item);
@@ -621,8 +620,10 @@ const Game = {
 
     // 重拍（回到相机预览）
     retakePhoto() {
-        // 清除已拍照片
+        // 清除已拍照片和识别结果
         this._capturedPhotoDataURL = null;
+        this._verifyResults = null;
+        this._recognizedText = '';
 
         // 重新打开相机
         this.openCamera();
@@ -656,7 +657,7 @@ const Game = {
         input.click();
     },
 
-    // 阶段3：核对答案（家长对照照片，逐题点选孩子写的答案）
+    // 阶段3：自动识别核对
     showVerifyPhase() {
         document.getElementById('offlinePhase2').classList.add('hidden');
         document.getElementById('offlinePhase3').classList.remove('hidden');
@@ -675,87 +676,155 @@ const Game = {
             placeholder.classList.remove('hidden');
         }
 
-        // 生成核对列表：每题显示选项按钮，家长点选孩子写的答案
+        // 清空之前的结果，显示加载状态
         const verifyQuestionsEl = document.getElementById('verifyQuestions');
         verifyQuestionsEl.innerHTML = '';
+        document.getElementById('ocrStatus').classList.remove('hidden');
+        document.getElementById('verifyAllCorrectBtn').classList.add('hidden');
+        document.getElementById('verifyHasWrongBtn').classList.add('hidden');
+        document.getElementById('verifyInstructionText').textContent = '系统正在识别照片中的答案，请稍候...';
 
-        this._verifyResults = new Array(this.currentQuiz.totalQuestions).fill(null);
+        // 开始 OCR 识别
+        this.startOCR();
+    },
 
-        this.currentQuiz.page.questions.forEach((q, idx) => {
+    // 启动 Tesseract.js 进行 OCR 识别
+    async startOCR() {
+        const statusText = document.getElementById('ocrStatusText');
+
+        // 检查 Tesseract.js 是否加载成功
+        if (typeof Tesseract === 'undefined') {
+            statusText.textContent = '识别引擎加载失败，请刷新页面重试';
+            this.showToast('⚠️ 识别引擎未加载，请检查网络', 'danger');
+            return;
+        }
+
+        statusText.textContent = '正在加载识别引擎（首次使用需要下载数据，请稍候）...';
+
+        try {
+            this._tesseractWorker = await Tesseract.createWorker('chi_sim+eng', 1, {
+                logger: (m) => {
+                    if (m.status === 'recognizing text') {
+                        statusText.textContent = `正在识别照片中... ${Math.round(m.progress * 100)}%`;
+                    } else if (m.status === 'loading language traineddata') {
+                        statusText.textContent = `正在加载语言数据... ${Math.round(m.progress * 100)}%`;
+                    } else {
+                        statusText.textContent = m.status;
+                    }
+                }
+            });
+
+            const result = await this._tesseractWorker.recognize(this._capturedPhotoDataURL);
+            await this._tesseractWorker.terminate();
+            this._tesseractWorker = null;
+
+            this._recognizedText = result.data.text || '';
+            this.processOCRResult(this._recognizedText);
+        } catch (err) {
+            console.error('OCR识别失败:', err);
+            statusText.textContent = '识别失败，请重试或改用在线答题模式';
+            this.showToast('⚠️ 自动识别失败：' + err.message, 'danger');
+        }
+    },
+
+    // 处理 OCR 结果：清理文本并按顺序匹配每道题的正确答案
+    processOCRResult(rawText) {
+        const recognized = this.cleanOCRText(rawText);
+        const questions = this.currentQuiz.page.questions;
+        const results = [];
+
+        // 复制一份用于逐步匹配
+        let remainingText = recognized;
+
+        questions.forEach((q) => {
+            const answer = this.cleanOCRText(q.options[q.answer]);
+            const match = this.findAndRemoveAnswer(remainingText, answer);
+            results.push(match.found);
+            remainingText = match.remaining;
+        });
+
+        this._verifyResults = results;
+        this.renderOCRResults(rawText, results);
+    },
+
+    // 清理 OCR 文本：去除空格、标点，统一小写
+    cleanOCRText(text) {
+        if (!text) return '';
+        return text
+            .replace(/\s+/g, '')                       // 去除所有空白
+            .replace(/[，。、；：？！.,;:!?\-_\|\/\\]/g, '') // 去除常见标点
+            .toLowerCase();                            // 英文统一小写
+    },
+
+    // 在文本中查找答案并移除，避免重复匹配
+    findAndRemoveAnswer(text, answer) {
+        const idx = text.indexOf(answer);
+        if (idx !== -1) {
+            return {
+                found: true,
+                remaining: text.slice(0, idx) + text.slice(idx + answer.length)
+            };
+        }
+        return { found: false, remaining: text };
+    },
+
+    // 渲染 OCR 识别结果和每题判断
+    renderOCRResults(rawText, results) {
+        const questions = this.currentQuiz.page.questions;
+        const container = document.getElementById('verifyQuestions');
+        container.innerHTML = '';
+
+        let correctCount = 0;
+
+        questions.forEach((q, idx) => {
+            const isCorrect = results[idx];
+            if (isCorrect) correctCount++;
+
+            const answerText = q.options[q.answer];
             const row = document.createElement('div');
-            row.className = 'verify-question-row';
-            row.dataset.questionIndex = idx;
-
-            // 生成选项按钮 A/B/C/D
-            const optionsHtml = q.options.map((opt, oIdx) => {
-                const label = String.fromCharCode(65 + oIdx);
-                return `<button class="verify-option-btn" data-qidx="${idx}" data-oidx="${oIdx}" onclick="Game.selectVerifyAnswer(${idx}, ${oIdx})">${label}. ${opt}</button>`;
-            }).join('');
-
+            row.className = `verify-question-row ${isCorrect ? 'correct' : 'wrong'}`;
             row.innerHTML = `
                 <div class="verify-q-num">${idx + 1}</div>
                 <div class="verify-q-content">
                     <div class="verify-q-text">${q.q}</div>
-                    <div class="verify-q-options">${optionsHtml}</div>
-                    <div class="verify-q-result hidden"></div>
+                    <div class="verify-q-answer">正确答案：<b>${answerText}</b></div>
+                    <div class="verify-q-result ${isCorrect ? 'correct' : 'wrong'}">${isCorrect ? '✅ 识别正确' : '❌ 未识别到'}</div>
                 </div>
             `;
-            verifyQuestionsEl.appendChild(row);
+            container.appendChild(row);
         });
 
-        // 隐藏操作按钮（等所有题都选完才显示）
-        document.getElementById('verifyAllCorrectBtn').classList.add('hidden');
-        document.getElementById('verifyHasWrongBtn').classList.add('hidden');
-    },
+        // 显示原始识别文本（可折叠）
+        const rawTextEl = document.createElement('div');
+        rawTextEl.className = 'ocr-raw-text';
+        rawTextEl.innerHTML = `
+            <div class="ocr-raw-label">📝 系统识别到的内容：</div>
+            <div class="ocr-raw-content">${this.escapeHtml(rawText || '（未识别到文字）')}</div>
+            <div class="ocr-raw-tip">如果识别结果和实际写的不符，建议写工整后重拍</div>
+        `;
+        container.appendChild(rawTextEl);
 
-    // 家长点选孩子写的答案（系统自动判断对错）
-    selectVerifyAnswer(questionIdx, selectedOptionIdx) {
-        const q = this.currentQuiz.page.questions[questionIdx];
-        const isCorrect = selectedOptionIdx === q.answer;
-        this._verifyResults[questionIdx] = isCorrect;
+        // 更新状态提示
+        document.getElementById('ocrStatus').classList.add('hidden');
+        document.getElementById('verifyInstructionText').innerHTML =
+            `识别完成！共 <b>${results.length}</b> 题，答对 <b>${correctCount}</b> 题`;
 
-        // 更新 UI
-        const row = document.querySelector(`.verify-question-row[data-question-index="${questionIdx}"]`);
-        const buttons = row.querySelectorAll('.verify-option-btn');
-        const resultEl = row.querySelector('.verify-q-result');
-
-        // 重置所有按钮状态
-        buttons.forEach(btn => {
-            btn.classList.remove('selected', 'correct-answer', 'wrong-answer');
-        });
-
-        // 标记选中的按钮
-        buttons[selectedOptionIdx].classList.add('selected');
-
-        if (isCorrect) {
-            buttons[selectedOptionIdx].classList.add('correct-answer');
-            resultEl.textContent = '✅ 正确！';
-            resultEl.className = 'verify-q-result correct';
-        } else {
-            buttons[selectedOptionIdx].classList.add('wrong-answer');
-            // 同时高亮正确答案
-            buttons[q.answer].classList.add('correct-answer');
-            resultEl.innerHTML = `❌ 错误！正确答案：${String.fromCharCode(65 + q.answer)}`;
-            resultEl.className = 'verify-q-result wrong';
-        }
-
-        resultEl.classList.remove('hidden');
-
-        // 检查是否所有题都已回答
-        const allAnswered = this._verifyResults.every(r => r !== null);
-        if (allAnswered) {
-            const allCorrect = this._verifyResults.every(r => r === true);
-            if (allCorrect) {
-                document.getElementById('verifyAllCorrectBtn').classList.remove('hidden');
-                document.getElementById('verifyHasWrongBtn').classList.add('hidden');
-            } else {
-                document.getElementById('verifyAllCorrectBtn').classList.add('hidden');
-                document.getElementById('verifyHasWrongBtn').classList.remove('hidden');
-            }
+        // 显示操作按钮
+        const allCorrect = results.every(r => r === true);
+        if (allCorrect) {
+            document.getElementById('verifyAllCorrectBtn').classList.remove('hidden');
+            document.getElementById('verifyHasWrongBtn').classList.add('hidden');
         } else {
             document.getElementById('verifyAllCorrectBtn').classList.add('hidden');
-            document.getElementById('verifyHasWrongBtn').classList.add('hidden');
+            document.getElementById('verifyHasWrongBtn').classList.remove('hidden');
         }
+    },
+
+    // HTML 转义，防止识别文本中的特殊字符破坏页面
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     },
 
     // 放大查看照片
@@ -777,7 +846,7 @@ const Game = {
     // 有错误 → 不奖励，可重试
     verifyHasWrong() {
         const wrongCount = this._verifyResults.filter(r => r === false).length;
-        this.showToast(`❌ 有${wrongCount}道题答错了，请在本子上改正后重新拍照核对`, 'danger');
+        this.showToast(`❌ 有${wrongCount}道题没识别到或写错了，请在本子上改正后重新拍照核对`, 'danger');
         this.finishOfflineQuiz(false);
     },
 
@@ -790,7 +859,7 @@ const Game = {
             const lane = this.state.lanes.find(l => l.subject === subjectKey);
             const subject = CURRICULUM[subjectKey];
 
-            // 离线模式下，全部正确才给奖励（与在线一致）
+            // 离线模式下，全部正确才给奖励
             const baseReward = GAME_CONFIG.taskReward;
             const bonusReward = q.correctCount * GAME_CONFIG.correctAnswerBonus;
             const totalReward = baseReward + bonusReward;
@@ -829,6 +898,7 @@ const Game = {
             // 清除照片数据
             this._capturedPhotoDataURL = null;
             this._verifyResults = null;
+            this._recognizedText = '';
 
             // 重新打开离线测验（同一科目同一页）
             setTimeout(() => {
@@ -840,8 +910,13 @@ const Game = {
     // 取消离线测验
     cancelOffline() {
         this.stopCamera();
+        if (this._tesseractWorker) {
+            this._tesseractWorker.terminate();
+            this._tesseractWorker = null;
+        }
         this._capturedPhotoDataURL = null;
         this._verifyResults = null;
+        this._recognizedText = '';
         this.currentQuiz = null;
         document.getElementById('offlineModal').classList.add('hidden');
     },

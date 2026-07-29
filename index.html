@@ -106,14 +106,17 @@
         <div id="offlinePhase1" class="offline-phase">
             <div class="modal-title" id="offlineTitle">📝 线下书写模式</div>
             <div class="offline-instructions">
-                请让孩子在本子上按格式写出答案序号，写完后点击"拍照核对"
+                请让孩子在本子上按顺序写出每道题的<b>正确答案</b>，写完后点击"拍照核对"
             </div>
             <div class="offline-format-guide">
                 <div class="format-guide-title">📝 书写格式示例：</div>
-                <div class="format-guide-example">1.A &nbsp;&nbsp; 2.C &nbsp;&nbsp; 3.B &nbsp;&nbsp; 4.D</div>
-                <div class="format-guide-hint">在纸上写清题号和对应字母即可</div>
+                <div class="format-guide-example" id="offlineFormatExample">啊 &nbsp;&nbsp; 哦 &nbsp;&nbsp; 鹅 &nbsp;&nbsp; a</div>
+                <div class="format-guide-hint">按题目顺序，把正确答案写在一行，中间用空格分开</div>
             </div>
             <div class="offline-questions" id="offlineQuestions"></div>
+            <div class="offline-write-tips">
+                <div class="write-tip">✏️ 提示：写工整一点，系统拍照后会自动识别对错</div>
+            </div>
             <button class="btn btn-primary btn-lg offline-camera-btn" id="offlineCameraBtn" onclick="Game.openCamera()">
                 📸 拍照核对
             </button>
@@ -139,10 +142,10 @@
             </div>
         </div>
 
-        <!-- 阶段3：核对答案 -->
+        <!-- 阶段3：自动识别核对 -->
         <div id="offlinePhase3" class="offline-phase hidden">
-            <div class="modal-title">✅ 核对答案</div>
-            <div class="verify-instruction">👆 请对照照片，逐题点击孩子写的答案</div>
+            <div class="modal-title">🤖 自动识别核对</div>
+            <div class="verify-instruction" id="verifyInstructionText">系统正在识别照片中的答案，请稍候...</div>
             <div class="verify-layout">
                 <div class="verify-photo" id="verifyPhoto">
                     <img id="verifyPhotoImg" src="" alt="答案照片" onclick="Game.zoomPhoto()">
@@ -151,12 +154,16 @@
                 </div>
                 <div class="verify-questions" id="verifyQuestions"></div>
             </div>
+            <div class="ocr-status" id="ocrStatus">
+                <div class="ocr-spinner"></div>
+                <div class="ocr-status-text" id="ocrStatusText">正在加载识别引擎...</div>
+            </div>
             <div class="verify-actions" id="verifyActions">
-                <button class="btn btn-success btn-lg" id="verifyAllCorrectBtn" onclick="Game.verifyAllCorrect()">
+                <button class="btn btn-success btn-lg hidden" id="verifyAllCorrectBtn" onclick="Game.verifyAllCorrect()">
                     ✅ 全部正确，获得阳光！
                 </button>
-                <button class="btn btn-danger" id="verifyHasWrongBtn" onclick="Game.verifyHasWrong()">
-                    ❌ 有错误，需要重做
+                <button class="btn btn-danger hidden" id="verifyHasWrongBtn" onclick="Game.verifyHasWrong()">
+                    ❌ 有错误，重新书写
                 </button>
             </div>
         </div>
@@ -172,6 +179,7 @@
 </div>
 
 <!-- ==================== 脚本 ==================== -->
+<script src="https://unpkg.com/tesseract.js@5.0.4/dist/tesseract.min.js"></script>
 <script src="js/data.js"></script>
 <script src="js/game.js"></script>
 </body>
