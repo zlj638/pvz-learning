@@ -546,6 +546,10 @@ const Game = {
         document.getElementById('offlinePhase3').classList.add('hidden');
 
         document.getElementById('offlineModal').classList.remove('hidden');
+
+        // 每次重新进入 phase1 时，恢复手动核对按钮的显示状态
+        const manualBtn = document.getElementById('manualVerifyBtn');
+        if (manualBtn) manualBtn.classList.remove('hidden');
     },
 
     // 阶段2：打开相机
@@ -626,6 +630,9 @@ const Game = {
 
     // 重拍（回到相机预览）
     retakePhoto() {
+        // 让正在运行的旧 OCR session 失效（让上一次 OCR 即使完成也不写结果）
+        this._ocrSessionId = (this._ocrSessionId || 0) + 1;
+
         // 终止正在运行的 OCR worker
         if (this._tesseractWorker) {
             this._tesseractWorker.terminate();
@@ -635,10 +642,16 @@ const Game = {
         this._capturedPhotoDataURL = null;
         this._verifyResults = null;
         this._recognizedText = '';
+        this._ocrConfidence = 0;
 
         // 清空识别结果区域，防止显示旧数据
         document.getElementById('verifyQuestions').innerHTML = '';
         document.getElementById('ocrStatus').classList.add('hidden');
+
+        // 重置操作按钮
+        document.getElementById('verifyAllCorrectBtn').classList.add('hidden');
+        document.getElementById('verifyHasWrongBtn').classList.add('hidden');
+        document.getElementById('manualVerifyBtn').classList.add('hidden');
 
         // 重新打开相机
         this.openCamera();
@@ -652,57 +665,81 @@ const Game = {
         }
     },
 
-    // 图像预处理：灰度化、对比度增强、二值化，提升手写文字识别率
+    // 图像预处理：放大+温和灰度增强，保留笔画细节
+    // 关键改进：手写文字通常较小，必须放大；二值化会丢失笔画粗细，改为保留灰度
     preprocessImage(dataUrl) {
         return new Promise((resolve, reject) => {
             const img = new Image();
             img.crossOrigin = 'anonymous';
             img.onload = () => {
                 const canvas = document.createElement('canvas');
-                const maxSize = 1600;
+
+                // 第一步：放大到适合 OCR 的尺寸（手写文字小，必须放大才能识别）
+                // Tesseract 对 300DPI 以上的文字识别率最佳，目标边长 2400+
+                const targetSize = 2400;
                 let w = img.width;
                 let h = img.height;
-                if (w > maxSize || h > maxSize) {
-                    const ratio = Math.min(maxSize / w, maxSize / h);
-                    w = Math.round(w * ratio);
-                    h = Math.round(h * ratio);
-                }
+
+                // 计算放大比例（保证长边达到 targetSize）
+                const longSide = Math.max(w, h);
+                const scale = longSide < targetSize ? targetSize / longSide : 1;
+                w = Math.round(w * scale);
+                h = Math.round(h * scale);
+
                 canvas.width = w;
                 canvas.height = h;
                 const ctx = canvas.getContext('2d');
+
+                // 先用高质量缩放绘制原图（启用平滑）
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = 'high';
                 ctx.drawImage(img, 0, 0, w, h);
 
                 try {
                     const imgData = ctx.getImageData(0, 0, w, h);
                     const data = imgData.data;
 
-                    // 第一步：灰度化并增强对比度
+                    // 第二步：转灰度 + 温和对比度增强（不做过激二值化）
+                    // 二值化对儿童手写伤害大：笔画粗细不一，浅色笔迹会被误杀
                     for (let i = 0; i < data.length; i += 4) {
                         const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-                        // 增强对比度：让深色更深，浅色更浅
-                        let enhanced = (gray - 128) * 1.5 + 128;
+                        // 温和对比度增强（1.2 倍而非 1.5 倍）
+                        let enhanced = (gray - 128) * 1.2 + 128;
                         enhanced = Math.max(0, Math.min(255, enhanced));
                         data[i] = data[i + 1] = data[i + 2] = enhanced;
                     }
 
-                    // 第二步：Otsu-like 自适应二值化
-                    // 先计算平均亮度
-                    let sum = 0;
+                    // 第三步：白平衡（让纸面更白，笔迹更黑）
+                    // 找最亮 1% 的像素作为白点参考
+                    const histogram = new Array(256).fill(0);
                     for (let i = 0; i < data.length; i += 4) {
-                        sum += data[i];
+                        histogram[data[i]]++;
                     }
-                    const threshold = sum / (data.length / 4);
-
-                    for (let i = 0; i < data.length; i += 4) {
-                        const val = data[i] < threshold ? 0 : 255;
-                        data[i] = data[i + 1] = data[i + 2] = val;
+                    const totalPixels = data.length / 4;
+                    let whiteThreshold = 255;
+                    let cumulative = 0;
+                    for (let v = 255; v >= 0; v--) {
+                        cumulative += histogram[v];
+                        if (cumulative >= totalPixels * 0.005) {
+                            whiteThreshold = v;
+                            break;
+                        }
+                    }
+                    // 用最亮像素作为新的"白"，重新映射
+                    if (whiteThreshold < 250) {
+                        const ratio = 255 / Math.max(1, whiteThreshold);
+                        for (let i = 0; i < data.length; i += 4) {
+                            const newVal = Math.min(255, data[i] * ratio);
+                            data[i] = data[i + 1] = data[i + 2] = newVal;
+                        }
                     }
 
                     ctx.putImageData(imgData, 0, 0);
-                    resolve(canvas.toDataURL('image/jpeg', 0.9));
+                    resolve(canvas.toDataURL('image/jpeg', 0.92));
                 } catch (e) {
-                    // 预处理失败时返回原图
-                    resolve(dataUrl);
+                    // 预处理失败时返回放大后的原图
+                    console.warn('图像预处理失败，使用原图:', e);
+                    resolve(canvas.toDataURL('image/jpeg', 0.92));
                 }
             };
             img.onerror = () => resolve(dataUrl);
@@ -763,6 +800,7 @@ const Game = {
     },
 
     // 启动 Tesseract.js 进行 OCR 识别
+    // 关键改进：使用 PSM 6（单文本块）和 PSM 11（稀疏文本）两种模式分别识别，取文字更多的结果
     async startOCR() {
         const statusText = document.getElementById('ocrStatusText');
 
@@ -771,6 +809,10 @@ const Game = {
             try { await this._tesseractWorker.terminate(); } catch (e) { /* ignore */ }
             this._tesseractWorker = null;
         }
+
+        // 用版本号标记本次 OCR，重拍/取消时会自增，旧结果会失效
+        this._ocrSessionId = (this._ocrSessionId || 0) + 1;
+        const mySessionId = this._ocrSessionId;
 
         // 检查 Tesseract.js 是否加载成功
         if (typeof Tesseract === 'undefined') {
@@ -782,8 +824,10 @@ const Game = {
         statusText.textContent = '正在加载识别引擎（首次使用需要下载数据，请稍候）...';
 
         try {
-            this._tesseractWorker = await Tesseract.createWorker('chi_sim+eng', 1, {
+            const worker = await Tesseract.createWorker('chi_sim+eng', 1, {
                 logger: (m) => {
+                    // 只更新当前 session 的状态（避免旧 OCR 的进度污染新一次）
+                    if (this._ocrSessionId !== mySessionId) return;
                     if (m.status === 'recognizing text') {
                         statusText.textContent = `正在识别照片中... ${Math.round(m.progress * 100)}%`;
                     } else if (m.status === 'loading language traineddata') {
@@ -793,30 +837,80 @@ const Game = {
                     }
                 }
             });
+            this._tesseractWorker = worker;
 
-            // 设置 OCR 参数：把图像当作单个文本块，提高手写/多行识别率
-            await this._tesseractWorker.setParameters({
-                tessedit_pageseg_mode: '6',
-                preserve_interword_spaces: '1'
-            });
+            // 检查 session 是否已被新一次 OCR 取代
+            if (this._ocrSessionId !== mySessionId) {
+                await worker.terminate();
+                return;
+            }
 
-            const result = await this._tesseractWorker.recognize(this._capturedPhotoDataURL);
-            await this._tesseractWorker.terminate();
-            this._tesseractWorker = null;
+            // ========== 多次 OCR 取最佳结果 ==========
+            // PSM 6: 假设为单一统一的文本块（适合一行答案）
+            // PSM 11: 稀疏文本，不做特定排序（适合分散的手写文字）
+            const psmModes = [
+                { mode: '6', label: 'PSM 6' },
+                { mode: '11', label: 'PSM 11' }
+            ];
 
-            this._recognizedText = result.data.text || '';
-            // 记录平均置信度，用于判断是否需要提示手动核对
-            const words = result.data.words || [];
-            const confidences = words.map(w => w.confidence || 0).filter(c => c > 0);
-            this._ocrConfidence = confidences.length
-                ? Math.round(confidences.reduce((a, b) => a + b, 0) / confidences.length)
-                : 0;
+            let bestResult = null;
+            let bestLength = 0;
+            let bestPsmLabel = '';
+            let bestConfidence = 0;
+
+            for (const psm of psmModes) {
+                if (this._ocrSessionId !== mySessionId) break; // session 已失效
+                try {
+                    await worker.setParameters({
+                        tessedit_pageseg_mode: psm.mode,
+                        preserve_interword_spaces: '1'
+                    });
+
+                    statusText.textContent = `正在识别（${psm.label}）...`;
+                    const result = await worker.recognize(this._capturedPhotoDataURL);
+                    const text = (result.data.text || '').trim();
+                    const words = result.data.words || [];
+                    const confs = words.map(w => w.confidence || 0).filter(c => c > 0);
+                    const avgConf = confs.length ? confs.reduce((a, b) => a + b, 0) / confs.length : 0;
+
+                    // 优先选识别文字更多的结果；如果文字长度相当，选置信度更高的
+                    if (text.length > bestLength || (text.length === bestLength && avgConf > bestConfidence)) {
+                        bestResult = text;
+                        bestLength = text.length;
+                        bestPsmLabel = psm.label;
+                        bestConfidence = avgConf;
+                    }
+                } catch (e) {
+                    console.warn(`${psm.label} 识别失败:`, e);
+                }
+            }
+
+            // 最后再检查一次：session 是否还有效
+            if (this._ocrSessionId !== mySessionId) {
+                await worker.terminate();
+                return;
+            }
+
+            await worker.terminate();
+            if (this._tesseractWorker === worker) this._tesseractWorker = null;
+
+            this._recognizedText = bestResult || '';
+            this._ocrConfidence = Math.round(bestConfidence);
+
+            console.log(`OCR 最佳结果 [${bestPsmLabel}], 文字长度=${bestLength}, 置信度=${this._ocrConfidence}%, 内容:`, this._recognizedText);
 
             this.processOCRResult(this._recognizedText);
         } catch (err) {
+            // session 已失效时静默退出
+            if (this._ocrSessionId !== mySessionId) return;
             console.error('OCR识别失败:', err);
-            statusText.textContent = '识别失败，请重试或改用在线答题模式';
+            statusText.textContent = '识别失败，请重试或改用手动核对';
             this.showToast('⚠️ 自动识别失败：' + err.message, 'danger');
+
+            // OCR 失败时，自动切换到手动核对
+            setTimeout(() => {
+                if (this._ocrSessionId === mySessionId) this.switchToManualVerify();
+            }, 800);
         }
     },
 
@@ -939,6 +1033,7 @@ const Game = {
         container.innerHTML = '';
 
         let correctCount = 0;
+        const unrecognizedCount = results.filter(r => !r).length;
 
         questions.forEach((q, idx) => {
             const isCorrect = results[idx];
@@ -963,19 +1058,25 @@ const Game = {
         rawTextEl.className = 'ocr-raw-text';
         rawTextEl.innerHTML = `
             <div class="ocr-raw-label">📝 系统识别到的内容：</div>
-            <div class="ocr-raw-content">${this.escapeHtml(rawText || '（未识别到文字）')}</div>
-            <div class="ocr-raw-tip">如果识别结果和实际写的不符，建议写工整后重拍</div>
+            <div class="ocr-raw-content">${this.escapeHtml(rawText || '（未识别到任何文字）')}</div>
+            <div class="ocr-raw-tip">如果识别结果和实际写的不符，建议写工整后重拍，或点击下方"手动核对"逐题确认</div>
         `;
         container.appendChild(rawTextEl);
 
         // 更新状态提示
         document.getElementById('ocrStatus').classList.add('hidden');
-        const lowConfidence = (this._ocrConfidence || 0) < 50;
-        const confidenceHint = lowConfidence
-            ? '<br><span style="color:#E65100;font-size:13px;">⚠️ 识别置信度较低，建议点击「手动核对」</span>'
-            : '';
+        const confidence = this._ocrConfidence || 0;
+        const allUnrecognized = unrecognizedCount === results.length;
+        const lowConfidence = confidence < 50;
+
+        let hintHtml = '';
+        if (allUnrecognized) {
+            hintHtml = '<br><span style="color:#D32F2F;font-size:13px; font-weight:bold;">⚠️ 完全未识别到手写内容，请点击"手动核对"逐题确认</span>';
+        } else if (unrecognizedCount > 0 || lowConfidence) {
+            hintHtml = `<br><span style="color:#E65100;font-size:13px;">⚠️ ${unrecognizedCount}题未识别/置信度${confidence}%较低，建议手动核对确认</span>`;
+        }
         document.getElementById('verifyInstructionText').innerHTML =
-            `识别完成！共 <b>${results.length}</b> 题，答对 <b>${correctCount}</b> 题${confidenceHint}`;
+            `识别完成！共 <b>${results.length}</b> 题，自动识别对 <b>${correctCount}</b> 题${hintHtml}`;
 
         // 显示操作按钮
         const allCorrect = results.every(r => r === true);
@@ -987,6 +1088,7 @@ const Game = {
         } else {
             document.getElementById('verifyAllCorrectBtn').classList.add('hidden');
             document.getElementById('verifyHasWrongBtn').classList.remove('hidden');
+            // 始终显示手动核对按钮，确保 OCR 失败时用户有兜底
             manualBtn.classList.remove('hidden');
         }
     },
@@ -1149,10 +1251,18 @@ const Game = {
             document.getElementById('offlinePhase3').classList.add('hidden');
             document.getElementById('offlineModal').classList.add('hidden');
 
+            // 让任何旧 OCR 失效
+            this._ocrSessionId = (this._ocrSessionId || 0) + 1;
+            if (this._tesseractWorker) {
+                this._tesseractWorker.terminate();
+                this._tesseractWorker = null;
+            }
+
             // 清除照片数据
             this._capturedPhotoDataURL = null;
             this._verifyResults = null;
             this._recognizedText = '';
+            this._ocrConfidence = 0;
 
             // 重新打开离线测验（同一科目同一页）
             setTimeout(() => {
@@ -1164,6 +1274,8 @@ const Game = {
     // 取消离线测验
     cancelOffline() {
         this.stopCamera();
+        // 让任何运行中的旧 OCR session 失效
+        this._ocrSessionId = (this._ocrSessionId || 0) + 1;
         if (this._tesseractWorker) {
             this._tesseractWorker.terminate();
             this._tesseractWorker = null;
@@ -1171,6 +1283,7 @@ const Game = {
         this._capturedPhotoDataURL = null;
         this._verifyResults = null;
         this._recognizedText = '';
+        this._ocrConfidence = 0;
         this.currentQuiz = null;
         document.getElementById('offlineModal').classList.add('hidden');
     },
