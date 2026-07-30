@@ -611,9 +611,12 @@ const Game = {
         const ctx = canvas.getContext('2d');
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-        // 保存照片数据
+        // 保存照片数据：生成原图+灰度两个版本
         const rawDataUrl = canvas.toDataURL('image/jpeg', 0.85);
-        this._capturedPhotoDataURL = await this.preprocessImage(rawDataUrl);
+        const variants = await this.prepareImageVariants(rawDataUrl);
+        this._capturedPhotoDataURL = variants.gray;       // 预览用灰度版
+        this._ocrImageOriginal = variants.original;       // OCR 用原图版
+        this._ocrImageGray = variants.gray;               // OCR 用灰度版
 
         // 播放闪光效果
         const flash = document.createElement('div');
@@ -640,6 +643,8 @@ const Game = {
         }
         // 清除已拍照片和识别结果
         this._capturedPhotoDataURL = null;
+        this._ocrImageOriginal = null;
+        this._ocrImageGray = null;
         this._verifyResults = null;
         this._recognizedText = '';
         this._ocrConfidence = 0;
@@ -665,24 +670,25 @@ const Game = {
         }
     },
 
-    // 图像预处理：放大 + Sauvola 自适应二值化
-    // 手写中文笔画细、灰度浅，温和增强不够→必须用自适应阈值来提取笔画
-    preprocessImage(dataUrl) {
-        return new Promise((resolve, reject) => {
+    // 图像预处理：生成两个版本供 OCR 尝试
+    // - 原图版：保留所有细节，不做任何处理
+    // - 灰度版：去色，保留笔画灰度信息（不二值化，避免破坏复杂汉字）
+    // 两个版本各跑 OCR，取结果最好的
+    async prepareImageVariants(dataUrl) {
+        return new Promise((resolve) => {
             const img = new Image();
             img.crossOrigin = 'anonymous';
             img.onload = () => {
                 const canvas = document.createElement('canvas');
-
-                // 第一步：放大到适合 OCR 的尺寸
-                const targetSize = 2400;
+                // 不放大！手机照片分辨率已足够；只限制最大尺寸防止内存问题
+                const maxSize = 1800;
                 let w = img.width;
                 let h = img.height;
-                const longSide = Math.max(w, h);
-                const scale = longSide < targetSize ? targetSize / longSide : 1;
-                w = Math.round(w * scale);
-                h = Math.round(h * scale);
-
+                if (w > maxSize || h > maxSize) {
+                    const ratio = Math.min(maxSize / w, maxSize / h);
+                    w = Math.round(w * ratio);
+                    h = Math.round(h * ratio);
+                }
                 canvas.width = w;
                 canvas.height = h;
                 const ctx = canvas.getContext('2d');
@@ -690,86 +696,29 @@ const Game = {
                 ctx.imageSmoothingQuality = 'high';
                 ctx.drawImage(img, 0, 0, w, h);
 
+                // 版本1：原图（保留颜色，Tesseract 内部处理）
+                const originalUrl = canvas.toDataURL('image/png');
+
+                // 版本2：灰度版（去色但不断言为黑白，保留笔画深浅）
                 try {
                     const imgData = ctx.getImageData(0, 0, w, h);
-                    const data = imgData.data;
-                    const len = data.length;
-
-                    // 第二步：转灰度
-                    for (let i = 0; i < len; i += 4) {
-                        const gray = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
-                        data[i] = data[i + 1] = data[i + 2] = gray;
+                    const d = imgData.data;
+                    for (let i = 0; i < d.length; i += 4) {
+                        const gray = Math.round(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]);
+                        d[i] = d[i + 1] = d[i + 2] = gray;
                     }
-
-                    // 第三步：Sauvola 自适应二值化
-                    // 对每个像素，取周围 windowSize×windowSize 区域计算均值和标准差
-                    // 阈值 = mean * (1 + k * (stddev / R - 1))
-                    // R = 128（8-bit灰度最大标准差），k = 0.3（偏低以捕捉浅色笔迹）
-                    const windowSize = 25; // 窗口大小：手写笔画通常在这个尺度内
-                    const k = 0.25;        // 偏小值→阈值更低→更多像素被判为文字
-                    const R = 128;
-                    const halfWin = Math.floor(windowSize / 2);
-
-                    // 先建立积分图加速均值/方差计算
-                    const integral = new Float64Array((w + 1) * (h + 1));
-                    const sqIntegral = new Float64Array((w + 1) * (h + 1));
-                    for (let y = 0; y < h; y++) {
-                        const rowOff = y * w;
-                        const iRow = (y + 1) * (w + 1);
-                        const prevIRow = y * (w + 1);
-                        for (let x = 0; x < w; x++) {
-                            const v = data[(rowOff + x) * 4];
-                            integral[iRow + x + 1] = v + integral[prevIRow + x + 1] + integral[iRow + x] - integral[prevIRow + x];
-                            sqIntegral[iRow + x + 1] = v * v + sqIntegral[prevIRow + x + 1] + sqIntegral[iRow + x] - sqIntegral[prevIRow + x];
-                        }
-                    }
-
-                    // 对每个像素应用自适应阈值
-                    for (let y = 0; y < h; y++) {
-                        const yStart = Math.max(0, y - halfWin);
-                        const yEnd = Math.min(h - 1, y + halfWin);
-                        const areaH = (yEnd - yStart + 1);
-                        for (let x = 0; x < w; x++) {
-                            const xStart = Math.max(0, x - halfWin);
-                            const xEnd = Math.min(w - 1, x + halfWin);
-                            const areaW = (xEnd - xStart + 1);
-                            const area = areaW * areaH;
-
-                            // 用积分图快速计算窗口内的均值和标准差
-                            const top = yStart * (w + 1);
-                            const bot = (yEnd + 1) * (w + 1);
-                            const sum = integral[bot + xEnd + 1] - integral[top + xEnd + 1] - integral[bot + xStart] + integral[top + xStart];
-                            const sqSum = sqIntegral[bot + xEnd + 1] - sqIntegral[top + xEnd + 1] - sqIntegral[bot + xStart] + sqIntegral[top + xStart];
-
-                            const mean = sum / area;
-                            const variance = (sqSum / area) - (mean * mean);
-                            const stddev = Math.sqrt(Math.max(0, variance));
-
-                            const threshold = mean * (1 + k * (stddev / R - 1));
-                            const pixelIdx = (y * w + x) * 4;
-                            const val = data[pixelIdx] < threshold ? 0 : 255;
-                            data[pixelIdx] = data[pixelIdx + 1] = data[pixelIdx + 2] = val;
-                        }
-                    }
-
                     ctx.putImageData(imgData, 0, 0);
-                    resolve(canvas.toDataURL('image/jpeg', 0.92));
                 } catch (e) {
-                    console.warn('图像预处理失败，使用放大后原图:', e);
-                    // 回退：只做放大+灰度
-                    try {
-                        const imgData2 = ctx.getImageData(0, 0, w, h);
-                        const d2 = imgData2.data;
-                        for (let i = 0; i < d2.length; i += 4) {
-                            const gray = Math.round(0.299 * d2[i] + 0.587 * d2[i + 1] + 0.114 * d2[i + 2]);
-                            d2[i] = d2[i + 1] = d2[i + 2] = gray;
-                        }
-                        ctx.putImageData(imgData2, 0, 0);
-                    } catch (e2) { /* ignore */ }
-                    resolve(canvas.toDataURL('image/jpeg', 0.92));
+                    console.warn('灰度转换失败，仍使用原图:', e);
                 }
+                const grayUrl = canvas.toDataURL('image/png');
+
+                resolve({ original: originalUrl, gray: grayUrl });
             };
-            img.onerror = () => resolve(dataUrl);
+            img.onerror = () => {
+                // 图像加载失败时，原样返回
+                resolve({ original: dataUrl, gray: dataUrl });
+            };
             img.src = dataUrl;
         });
     },
@@ -785,7 +734,10 @@ const Game = {
             const reader = new FileReader();
             reader.onload = async (ev) => {
                 const rawDataUrl = ev.target.result;
-                this._capturedPhotoDataURL = await this.preprocessImage(rawDataUrl);
+                const variants = await this.prepareImageVariants(rawDataUrl);
+                this._capturedPhotoDataURL = variants.gray;
+                this._ocrImageOriginal = variants.original;
+                this._ocrImageGray = variants.gray;
                 // 隐藏阶段1，直接进入核对阶段
                 document.getElementById('offlinePhase1').classList.add('hidden');
                 this.showVerifyPhase();
@@ -826,12 +778,12 @@ const Game = {
         this.startOCR();
     },
 
-    // 启动 Tesseract.js 进行 OCR 识别
-    // 针对手写中文：多种语言配置 × 多种 PSM 模式组合尝试，按中文字符数评分
+    // 启动 Tesseract.js OCR：双图源（原图 + 灰度）× 3 种 PSM 模式
+    // 取识别中文最多的结果，避免复杂预处理造成的内存和精度问题
     async startOCR() {
         const statusText = document.getElementById('ocrStatusText');
 
-        // 先终止可能还在运行的上一个 worker
+        // 终止旧 worker
         if (this._tesseractWorker) {
             try { await this._tesseractWorker.terminate(); } catch (e) { /* ignore */ }
             this._tesseractWorker = null;
@@ -848,46 +800,42 @@ const Game = {
 
         statusText.textContent = '正在加载识别引擎...';
 
-        // ========== 多语言 + 多 PSM 组合 ==========
-        // 两个语言配置：chi_sim+eng（中英混合）、chi_sim（纯中文）
-        const langConfigs = [
-            { langs: 'chi_sim+eng', label: '中英混合' },
-            { langs: 'chi_sim', label: '纯中文' }
-        ];
-        // 四个 PSM 模式：从宽松到严格
+        // 两个图源
+        const imageSources = [];
+        if (this._ocrImageOriginal) imageSources.push({ url: this._ocrImageOriginal, label: '原图' });
+        if (this._ocrImageGray) imageSources.push({ url: this._ocrImageGray, label: '灰度' });
+
+        // 三个 PSM 模式
         const psmModes = [
-            { mode: '3', label: '自动分页' },   // PSM 3: 全自动页面分割
-            { mode: '6', label: '文本块' },     // PSM 6: 单一文本块
-            { mode: '7', label: '单行文本' },    // PSM 7: 单行
-            { mode: '11', label: '稀疏文本' }    // PSM 11: 稀疏文本无序
+            { mode: '3', label: '自动' },
+            { mode: '6', label: '文本块' },
+            { mode: '7', label: '单行' }
         ];
 
         let bestResult = '';
-        let bestScore = 0;           // 评分：中文字符得 3 分，英文/数字得 1 分
-        let bestPsmLabel = '';
-        let bestLangLabel = '';
-        let bestConfidence = 0;
+        let bestScore = 0;
+        let bestInfo = '';
 
         try {
-            for (const langCfg of langConfigs) {
-                if (this._ocrSessionId !== mySessionId) break;
-
-                statusText.textContent = `正在加载语言数据（${langCfg.label}）...`;
-
-                const worker = await Tesseract.createWorker(langCfg.langs, 1, {
-                    logger: (m) => {
-                        if (this._ocrSessionId !== mySessionId) return;
-                        if (m.status === 'recognizing text') {
-                            statusText.textContent = `正在识别（${langCfg.label} ${bestPsmLabel || ''}）... ${Math.round(m.progress * 100)}%`;
-                        } else if (m.status === 'loading language traineddata') {
-                            statusText.textContent = `加载语言数据... ${Math.round(m.progress * 100)}%`;
-                        }
+            // 只用一个语言配置（chi_sim+eng 覆盖中英文）
+            statusText.textContent = '正在加载中英文识别引擎...';
+            const worker = await Tesseract.createWorker('chi_sim+eng', 1, {
+                logger: (m) => {
+                    if (this._ocrSessionId !== mySessionId) return;
+                    if (m.status === 'recognizing text') {
+                        statusText.textContent = `正在识别... ${Math.round(m.progress * 100)}%`;
+                    } else if (m.status === 'loading language traineddata') {
+                        statusText.textContent = `加载语言包... ${Math.round(m.progress * 100)}%`;
                     }
-                });
-                this._tesseractWorker = worker;
+                }
+            });
+            this._tesseractWorker = worker;
 
-                if (this._ocrSessionId !== mySessionId) { await worker.terminate(); return; }
+            if (this._ocrSessionId !== mySessionId) { await worker.terminate(); return; }
 
+            // 双图源 × 多 PSM
+            for (const imgSrc of imageSources) {
+                if (this._ocrSessionId !== mySessionId) break;
                 for (const psm of psmModes) {
                     if (this._ocrSessionId !== mySessionId) break;
                     try {
@@ -896,58 +844,47 @@ const Game = {
                             preserve_interword_spaces: '1'
                         });
 
-                        statusText.textContent = `正在识别（${langCfg.label} + ${psm.label}）...`;
-                        const result = await worker.recognize(this._capturedPhotoDataURL);
+                        statusText.textContent = `识别中（${imgSrc.label} + ${psm.label}）...`;
+                        const result = await worker.recognize(imgSrc.url);
                         const text = (result.data.text || '').trim();
 
-                        // 计算评分：中文字符权重大
-                        let chineseCount = 0;
-                        let otherCount = 0;
+                        // 统计中英文字符
+                        let cn = 0, en = 0;
                         for (const ch of text) {
-                            if (/[\u4e00-\u9fff\u3400-\u4dbf]/.test(ch)) {
-                                chineseCount++;
-                            } else if (/[a-zA-Z0-9]/.test(ch)) {
-                                otherCount++;
-                            }
+                            if (/[\u4e00-\u9fff\u3400-\u4dbf]/.test(ch)) cn++;
+                            else if (/[a-zA-Z0-9]/.test(ch)) en++;
                         }
-                        const score = chineseCount * 3 + otherCount;
+                        const score = cn * 3 + en;
 
-                        const words = result.data.words || [];
-                        const confs = words.map(w => w.confidence || 0).filter(c => c > 0);
-                        const avgConf = confs.length ? Math.round(confs.reduce((a, b) => a + b, 0) / confs.length) : 0;
+                        console.log(`OCR [${imgSrc.label}][${psm.label}] 中文=${cn} 英文=${en} 得分=${score}: "${text}"`);
 
-                        console.log(`OCR [${langCfg.label}][${psm.label}] 中文=${chineseCount} 英文/数字=${otherCount} 得分=${score} 置信度=${avgConf}%:`, text);
-
-                        if (score > bestScore || (score === bestScore && avgConf > bestConfidence)) {
+                        if (score > bestScore) {
                             bestResult = text;
                             bestScore = score;
-                            bestPsmLabel = psm.label;
-                            bestLangLabel = langCfg.label;
-                            bestConfidence = avgConf;
+                            bestInfo = `${imgSrc.label}+${psm.label}`;
                         }
                     } catch (e) {
-                        console.warn(`${langCfg.label} + ${psm.label} 失败:`, e);
+                        console.warn(`OCR [${imgSrc.label}][${psm.label}] 失败:`, e);
                     }
                 }
-
-                await worker.terminate();
-                if (this._tesseractWorker === worker) this._tesseractWorker = null;
             }
 
-            if (this._ocrSessionId !== mySessionId) return;
+            if (this._ocrSessionId !== mySessionId) { await worker.terminate(); return; }
+
+            await worker.terminate();
+            if (this._tesseractWorker === worker) this._tesseractWorker = null;
 
             this._recognizedText = bestResult || '';
-            this._ocrConfidence = bestConfidence;
 
             const cnCount = (bestResult.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
-            console.log(`OCR 最佳 [${bestLangLabel}][${bestPsmLabel}] 得分=${bestScore} 中文=${cnCount} 置信度=${bestConfidence}%`);
-            console.log(`原始识别内容:`, bestResult);
+            const enCount = (bestResult.match(/[a-zA-Z0-9]/g) || []).length;
+            console.log(`OCR 最佳[${bestInfo}] 得分=${bestScore} 中文=${cnCount} 英文=${enCount}: "${bestResult}"`);
 
             this.processOCRResult(this._recognizedText);
         } catch (err) {
             if (this._ocrSessionId !== mySessionId) return;
             console.error('OCR识别失败:', err);
-            statusText.textContent = '识别失败，请重试或改用手动核对';
+            statusText.textContent = '识别失败，请改用手动核对';
             this.showToast('⚠️ 自动识别失败，请点击"手动核对"', 'danger');
             setTimeout(() => {
                 if (this._ocrSessionId === mySessionId) this.switchToManualVerify();
@@ -1316,6 +1253,8 @@ const Game = {
 
             // 清除照片数据
             this._capturedPhotoDataURL = null;
+            this._ocrImageOriginal = null;
+            this._ocrImageGray = null;
             this._verifyResults = null;
             this._recognizedText = '';
             this._ocrConfidence = 0;
@@ -1337,6 +1276,8 @@ const Game = {
             this._tesseractWorker = null;
         }
         this._capturedPhotoDataURL = null;
+        this._ocrImageOriginal = null;
+        this._ocrImageGray = null;
         this._verifyResults = null;
         this._recognizedText = '';
         this._ocrConfidence = 0;
